@@ -1,0 +1,6 @@
+% pandoc header for rendering README.md to PDF:
+%   pandoc README.md -H readme_header.tex -V geometry:a4paper -V geometry:margin=2cm \
+%          --pdf-engine=xelatex -o README.pdf
+% Lets long file names in tables break after an underscore, and loosens row spacing.
+\renewcommand{\_}{\textunderscore\penalty0\hspace{0pt}}
+\renewcommand{\arraystretch}{1.3}

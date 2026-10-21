@@ -1,0 +1,293 @@
+---
+title: |
+    | Generalized Random Forest
+    | Supplementary 10
+    | Some background on causal analysis"
+author: "Rob Dunne, Ainura Tursunalieva"
+date: "Sunday, October 18, 2026"
+output: 
+    bookdown::pdf_document2:
+     geometry: a4paper
+     toc: true
+     toc_depth: 3
+     fig_caption: yes
+     citation_package: biblatex
+     biblio-style: apa
+     biblatexoptions: [backend=biber, maxbibnames=999]
+bibliography:
+    - wageinequality.bib
+header-includes:
+   - |
+     \usepackage{dcolumn}
+     \usepackage{placeins}
+     \usepackage{float}
+     \usepackage{ltablex}
+     \usepackage{array} 
+     \usepackage{caption}
+     \usepackage{subcaption}
+     \usepackage{rotating}
+     \usepackage{csquotes}
+     \DeclareMathOperator{\E}{E}
+     \newcommand{\hGamma}{\widehat{\Gamma}}
+     \newcommand{\htau}{\widehat{\tau}}
+     \DeclareMathOperator{\PP}{P}
+     \newcommand{\hmu}{\hat{\mu}}
+     \newcommand{\he}{\widehat{e}}
+     \newcommand{\p}{\widehat{e}}
+     \newcolumntype{Y}{>{\raggedright\arraybackslash}X} 
+     \let\oldmarginpar=\marginpar
+     \renewcommand\marginpar[1]{\-\oldmarginpar[\raggedleft\footnotesize #1]{\raggedright\footnotesize #1}}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=6, dpi=300,echo = FALSE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+
+```
+
+
+
+
+This file has no computations. It collects the definitions and the reasoning behind the estimators used in Supplementary 2 to 5.
+
+# Traditional Analysis Methods
+Current approaches rely primarily on:
+
+- Linear regression models
+- Oaxaca-Blinder decomposition (done in Supplementary 5)
+- Summary statistics of labor market experience
+
+While useful, these methods may not capture complex interactions between variables or identify heterogeneous effects
+across different subpopulations.
+
+# Inference and Causal Inference
+
+## Notation and definitions {#notation}
+
+Let's set some notation. Each data point can be defined by a triple $\{X_i, W_i, Y_i\}$. 
+
+- The vector $X_i$ represents covariates that are observed for individual $i$ 
+- $W_i \in \{0, 1\}$ where 0 represents women and 1 represents men. Because of the way that these methodologies were developed it is common to find
+  software, tutorials and articles that use the terms "treatment" and "control"
+- The scalar $Y_i$ is the observed outcome, and in this case it will generally be the log of the wages
+
+## Difference-in-means estimator 
+
+We begin by considering the simplest estimator that is available in experimental settings. The **difference-in-means** estimator is the sample average
+of outcomes in the treatment group minus the sample average of outcomes in the control group.  
+
+\begin{equation} 
+\widehat{\tau}^{DIFF} = \frac{1}{n_1} \sum_{i:W_i = 1} Y_i - \frac{1}{n_0} \sum_{i:W_i = 0} Y_i \qquad \text{where} \qquad n_w := |\{i : W_i = w \}| 
+\end{equation}
+
+The difference-in-means estimator is a simple, easily computable, unbiased, "model-free" estimator of the treatment effect.  It is what the WGEA (the Australian Workplace Gender Equality Agency) reports. In one sense we could leave it at that. There is the question of the different methodologies of the ABS and the WGEA but given that one has access to the total
+remuneration data for all employees in Australia (i.e. the tax receipts), the gender wage difference is easily calculated.
+
+So easy in fact that we are going to complicate it a lot. We would like to understand what variables drive it i.e. we want a causal analysis. We consider
+\[
+\tau_i = Y_i(W=1) - Y_i(W=0)
+\]
+
+A difficulty in estimating causal quantities is that we observe each individual in only one treatment state: either they were treated, or they weren't. However,
+it's often useful to imagine that each individual is endowed with two random variables $(Y_i(1), Y_i(0))$, where $Y_i(1)$ represents the value of this
+individual's outcome if they receive treatment, and $Y_i(0)$ represents their outcome if they are not treated. These random variables are called **potential
+outcomes**. The observed outcome $Y_i$ corresponds to whichever potential outcome we got to see: \begin{equation} Y_i \equiv Y_i(W_i) = \begin{cases} Y_i(1)
+\qquad \text{if }W_i = 1 \text{ (treated)} \\ Y_i(0) \qquad \text{if }W_i = 0 \text{ (control)}\\ \end{cases} \end{equation}
+
+I must admit that that I was not enamoured with this approach when I first saw it. We are now trying to estimate the wages for each individual as if we could
+change their sex and their whole life experience. So we have turned an easy calculation into a potentially intractable one. The benefits of doing this would
+have to be high to repay the efforts.  As a first step in simplifying the task we estimate the **average treatment effect (ATE)**:
+
+\begin{equation}
+  (\#eq:ate)
+  \tau := \E[Y_i(1) - Y_i(0)].
+\end{equation}
+
+An important point here is the conceptual difference between a  **randomized** setting like a randomized controlled trial and an observational setting.
+In a randomized setting we have
+\begin{equation}
+  (\#eq:unconf)
+  Y_i(1), Y_i(0) \perp W_i.
+\end{equation}
+
+When condition \@ref(eq:unconf) is violated, we say that we are in an **observational** setting. This is a more complex setting encompassing 
+several different scenarios: sometimes it's still possible to estimate the ATE under additional assumptions, sometimes the researcher can exploit 
+other sources of variation to obtain other interesting estimands. Here, we will focus on ATE estimation under the following assumption:  
+\begin{equation} (\#eq:cond-unconf) 
+Y_i(1), Y_i(0) \perp W_i \ | \ X_i.  
+\end{equation}
+
+This assumption is called **unconfoundedness**. 
+
+A key quantity of interest will be the **propensity score** $e(X_i) := \PP[W_i = 1 | X_i]$. In an experimental setting this quantity is usually known
+and fixed whereas in observational settings it must be estimated from the data. We will often need to assume that the propensity score is bounded away
+from zero and one. That is, there exists some $\eta > 0$ such that
+
+\begin{equation}
+  (\#eq:overlap)
+  \eta < e(x) < 1 - \eta  \qquad \text{for all }x.
+\end{equation}
+
+This assumption is known as **overlap**, and it means that for all types of people in our population (i.e., all values of observable characteristics) we can
+find some portion of individuals in treatment and some in control. Intuitively, this is necessary because we'd like to be comparing treatment and control at
+each level of the covariates and then aggregate those results.
+
+## Direct estimation
+
+Our first estimator is suggested by the following decomposition of the ATE, which is possible due to unconfoundedness \@ref(eq:cond-unconf),
+
+\begin{equation}
+  \E[Y_i(1) - Y_i(0)]
+  = \E[\E[Y_i | X_i, W_i=1]] - \E[\E[Y_i | X_i, W_i=0]].
+\end{equation}
+
+The decomposition suggests the procedure, sometimes called the **direct estimate** of the ATE:
+
+1. Estimate $\mu(x, w) := E[Y_i|X_i = x,W_i=w]$, perhaps using nonparametric methods.
+2. Predict $\hat{\mu}(X_i, 1)$ and $\hat{\mu}(X_i, 0)$ for each observation in the data.
+3. Average out the predictions and subtract them.
+\begin{equation}
+  \htau^{DM} := \frac{1}{n} \sum_{i=1}^{n} \hmu(X_i, 1) - \hmu(X_i, 0)
+\end{equation}
+
+This estimator allows us to leverage regression techniques to estimate the ATE, and by using the covariates it can have a smaller variance than the difference in means.
+However, it has several disadvantages that make it undesirable. First, its properties will rely heavily on the model $\hmu(x, w)$ being correctly specified: it
+will be an unbiased and/or consistent estimate of the ATE provided that $\hmu(x, w)$ is an unbiased and/or consistent estimator of $\E[Y|X=x, W=w]$. In
+practice, having a well-specified model may be rare. In general, it will also not be asymptotically normal, which means that we can’t
+easily compute $t$-statistics and $p$-values for it.
+
+
+## Inverse propensity-weighted estimator {#ipw}
+
+The IPW estimator accounts for selection bias in observational data. It reweights observations using the inverse of their probability of receiving the treatment they actually
+received. This is termed the  **propensity score** $\hat{e}(X_i)$ and is an  estimate of the probability of treatment given the control variable $e(X_i) = \PP[W_i=1 | X_i ]$.
+
+
+We can derive an estimator of the average treated outcome and for the average control outcome. Subtracting the two estimators leads to the following inverse propensity-weighted estimate of the treatment effect:
+\begin{equation}
+  (\#eq:ipw)
+  \widehat{\tau}^{IPW} :=
+  \frac{1}{n} \sum_{i=1}^{n} Y_i \frac{W_i}{\he(X_i)}
+  -
+  \frac{1}{n} \sum_{i=1}^{n} Y_i \frac{(1 - W_i) }{1-\he(X_i)}.
+\end{equation}
+
+The argument above suggests the following algorithm:
+
+1. Estimate the propensity scores $e(X_i)$ by regressing $W_i$ on $X_i$, perhaps using a non-parametric method. 
+2. Compute the IPW estimator summand:
+$$Z_i = Y_i \times \left(\frac{W_i}{\hat{e}(X_i)} - \frac{(1-W_i)}{(1-\hat{e}(X_i))} \right)$$ 
+3. Compute the mean and standard error of the new variable $Z_i$
+
+
+
+The behavior of the IPW estimator is similar to the direct estimator: if $\hat{e}(X_i)$ is a consistent estimator
+of $e(X_i)$, then \@ref(eq:ipw) is consistent for $\tau$. (Unbiasedness of $\hat{e}$ would not be enough, because the estimator involves $1/\hat{e}$.)
+In practice the two sums are often normalised by the sum of the weights $W_i/\hat{e}(X_i)$ and $(1-W_i)/(1-\hat{e}(X_i))$ (the Hájek form), which is less variable; with survey weights the same
+weighted means are used (see `weights.Rmd`).
+
+When the treatment propensity $\hat{e}(X_i)$ is near 0 or 1, the summands in \@ref(eq:ipw) can be very large or it can be undefined if they are exactly 0 or 1. 
+As well as requiring conditional unconfoundedness \@ref(eq:cond-unconf), it also requires the overlap
+condition \@ref(eq:overlap). In any case, when overlap is small IPW may become an unattractive estimator
+due to its high variance. 
+
+
+
+
+
+## Augmented inverse propensity-weighted (AIPW) estimator 
+
+The **augmented inverse propensity-weighted estimator** (AIPW) of the treatment effect is available under unconfoundedness \@ref(eq:cond-unconf) and overlap \@ref(eq:overlap):
+
+\begin{equation}
+  (\#eq:aipw)
+  \htau^{AIPW} := \frac{1}{n} \sum_{i=1}^{n} \left[ \hmu^{-i}(X_i, 1) - \hmu^{-i}(X_i, 0)
+      + \frac{W_i}{\he^{-i}(X_i)} \left( Y_i - \hmu^{-i}(X_i, 1) \right) - \frac{1-W_i}{1-\he^{-i}(X_i)} \left( Y_i - \hmu^{-i}(X_i, 0) \right) \right]
+\end{equation}
+
+where the superscript $-i$ means that the estimate was made without observation $i$ (cross-fitting; in a forest, with the trees for which $i$ was out of bag).
+
+The first two terms correspond to an estimate of the treatment effect obtained via direct
+estimation. The next two terms resemble the IPW estimator, except that we replaced the outcome $Y_i$ with the residuals $Y_i - \hmu(X_i, W_i)$. At a high level,
+the last two terms estimate and subtract an estimate of the bias of the first.
+
+The AIPW estimator \@ref(eq:aipw) has several desirable properties. First, it will be consistent provided that either $\hmu(X_i, w)$ or $\he(X_i)$ is consistent. This property is called **double robustness (DR)**,
+because only one of the outcome or propensity score models needs to be correctly specified, so the estimator is "robust" to misspecification in the remaining
+model. Under mild assumptions, the AIPW estimator is also asymptotically normal and **efficient** --- that is, it has the smallest asymptotic variance among a
+large class of estimators including the IPW estimator above. This is an attractive property because smaller variance implies smaller confidence intervals, and
+more power to test hypotheses about this parameter. In fact, it even has smaller variance than the difference-in-means estimators in the _randomized_ setting.
+
+
+@golubcapitalsocialimpactlabMLBasedCausal2021 recommends the following. In randomized settings, report the difference-in-means estimator (for simplicity) along
+with AIPW-based estimates (for efficiency); in observational settings with unconfoundedness and overlap, report AIPW-based estimates.
+
+
+\FloatBarrier
+
+## Diagnostics
+
+Here we show some basic diagnostics and best practices that should always be conducted. Although failing these tests should usually cause concern, passing them
+does not mean that the analysis is entirely free from issues. For example, even if our estimated propensity scores are bounded away from zero and one (and
+therefore seem to satisfy the overlap assumption), they may still be incorrect if we rely on incorrect modeling assumptions. Also, although we should expect to
+pass all the diagnostic tests below in randomized settings, it's good practice to check them anyway, as one may find problems with the experimental design.
+
+
+### Assessing balance {#balance}
+
+In observational settings the covariate distributions can be very different for treated and untreated individuals. Such -->
+<!-- discrepancies can lead to biased estimates of the ATE, but weighting observations based on -->
+<!-- inverse propensity weights may correct the avearage values. This property is called **balance**.  -->
+
+<!-- Given some covariate $X$  we can check the absolute standardized mean difference (ASMD) of -->
+<!-- $X$ between treated and untreated individuals  -->
+
+<!-- \begin{equation}  -->
+<!-- \frac{|\bar{X}_1 - \bar{X}_0|}{\sqrt{s_1^2 + s_0^2}},  -->
+<!-- \end{equation}  -->
+
+<!-- where $\bar{X}_1$ and $\bar{X}_0$ are sample averages of $X_i$, and $s_1$ and $s_0$ are standard deviations of $X_i$ for the two samples of treated and untreated -->
+<!-- individuals. Next, we can check the same quantity for their weighted counterparts $X_{i}W_i/\hat{e}(X_i)$ and $X_i(1-W_i)/(1-\hat{e}(X_i))$. If our propensity -->
+<!-- scores are well-calibrated, the ASMD for the weighted version should be close to zero. -->
+
+We can also check the entire distribution of covariates by plotting histograms.
+
+### Calibration of the forest {#calibration}
+
+The test_calibration function fits the following model:
+
+\begin{equation}
+Y_i - \hat{m}(X_i) = \alpha\bar{\tau}(W_i - \hat{e}(X_i)) + \beta(\hat{\tau}(X_i) - \bar{\tau})(W_i - \hat{e}(X_i)) + \epsilon_i
+\end{equation}
+
+where:
+
+- $\bar{\tau}$ is the average predicted treatment effect,
+- $\hat{\tau}(X_i)$ is the predicted treatment effect for observation $i$ (out of bag),
+- $\hat{m}(X_i)$ is the predicted outcome,
+- $\hat{e}(X_i)$ is the propensity score,
+- $W_i$ is the treatment indicator and $\epsilon_i$ is the error term.
+
+The coefficients have the following interpretations:
+
+- $\alpha$ (mean forest prediction) should be close to 1 if the average predictions are well-calibrated;
+- $\beta$ (differential forest prediction) should be close to 1 if the forest is capturing true effect heterogeneity. A coefficient well below 1 means that the heterogeneity found by the forest is
+  weaker than it looks; a coefficient significantly above 0 means that there is some real heterogeneity.
+
+The standard errors are heteroskedasticity-robust (HC3), and the $p$-values are one-sided, for
+$H_0: \alpha \leq 0$ vs $H_1: \alpha > 0$ and $H_0: \beta \leq 0$ vs $H_1: \beta > 0$.
+
+### Assessing overlap
+
+It's also important to check the estimated propensity scores. If they seem to cluster at zero or one, we should expect IPW and AIPW estimators to
+behave very poorly. 
+
+The propensity scores are also what decides *which* people the estimate describes. In this project the propensity of being male is estimated with a forest (Supplementary 2), and:
+
+- people with $\hat e(X_i)$ below 0.1 (mostly women) or above 0.9 (mostly men) are put in separate segments, because for them there is almost no comparison group of the other gender
+  (Supplementary 2 to 4);
+- the AIPW estimates are given for three target populations (`target.sample` in `average_treatment_effect()`): `all` (every person, which needs overlap and gives `NaN` when a propensity is exactly
+  0 or 1), `control` (the distribution of covariates of the women) and `overlap` (people weighted by $\hat e(X_i)(1-\hat e(X_i))$, which emphasises the people for whom men and women are
+  most alike and needs no trimming).
+
+A histogram of $\hat e(X_i)$ for men and for women is the usual check (the overlap histogram in Supplementary 2).

@@ -1,0 +1,209 @@
+---
+title: "Discussion: survey weights in the gender wage gap analysis"
+author: "Rob Dunne"
+output:
+    bookdown::pdf_document2:
+     toc: true
+     toc_depth: 3
+     fig_caption: yes
+     extra_dependencies: ["amsmath"]
+header-includes:
+   - \usepackage{tikz}
+   - \usetikzlibrary{positioning,arrows.meta,shapes}
+   - \usepackage{float}
+---
+
+# Purpose
+
+This note records what the project files say about the PUMS survey weights: whether they were used, how they were
+constructed, whether weighted and unweighted analyses were compared, where the decision was made, and whether
+weighting is appropriate (in particular after the data have been subsetted). It is based on a reading of the
+`.Rmd` files, not on re-running any code.
+
+# Data flow: which file creates and which file loads each data set
+
+Figure \ref{fig:dataflow} shows, for the `.Rdata` files in `processing_files/`, which `.Rmd` file writes them and which loads them. It is
+based on the `save` and `load` calls in the `.Rmd` files, not on the files on disk. Rectangles with a double border are `.Rmd` files, plain
+boxes are data files.
+
+- solid arrow: the `save` or `load` call runs when the document is knitted or the chunk is run.
+- dashed arrow: the call exists but is not in an executed chunk (`eval=FALSE`, or in a blockquote).
+- grey box: saved but loaded by no `.Rmd` file.
+- red dashed box: loaded by a file but not saved by any file (the load fails as written).
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  every node/.style={font=\scriptsize, align=center},
+  script/.style={rectangle, draw, double, minimum height=0.9cm, text width=3.3cm, fill=blue!8},
+  data/.style={rectangle, draw, rounded corners=2pt, minimum height=1.0cm, text width=2.6cm},
+  unused/.style={rectangle, draw=gray, text=gray, rounded corners=2pt, minimum height=1.0cm, text width=2.6cm},
+  missing/.style={rectangle, draw=red, dashed, text=red, rounded corners=2pt, minimum height=1.0cm, text width=2.6cm},
+  ext/.style={rectangle, draw, fill=yellow!15, minimum height=0.9cm, text width=3.6cm},
+  flow/.style={-{Stealth[length=2mm]}},
+  notrun/.style={-{Stealth[length=2mm]}, dashed},
+  bad/.style={-{Stealth[length=2mm]}, dashed, red}
+]
+% raw data and Supp 1
+\node[ext]    (raw) at (7.2,0)    {wage\_data.Rdata\\(raw PUMS, 3,214,539 $\times$ 25)};
+\node[script] (s1)  at (7.2,-1.8) {Supplementary 1\\preprocessing};
+% Supp 1 outputs
+\node[data]   (A) at (1.3,-4.0)  {Xtrain\_500000\_20\\.Rdata};
+\node[data]   (B) at (4.4,-4.0)  {X\_ordered\_numeric\_ 1061763\_industry\_269.Rdata};
+\node[data]   (C) at (7.5,-4.0)  {variable\_mappings\\.Rdata};
+\node[data]   (D) at (10.6,-4.0) {industry\_mapping\_ full\_description.Rdata};
+\node[unused] (E) at (13.7,-4.0) {occupation\_mapping\_ full\_description.Rdata};
+% Supp 2
+\node[script] (s2) at (2.9,-6.3) {Supplementary 2\\first look, weights, propensity};
+% Supp 2 outputs
+\node[unused] (I) at (1.2,-8.6) {aipw.grf.scores\\.Rdata};
+\node[data]   (F) at (4.0,-8.6) {numeric\_age\_ truncated\_data.Rdata};
+\node[data]   (G) at (6.9,-8.6) {X\_age\_ truncated\_data.Rdata};
+\node[data]   (H) at (9.6,-8.6) {capped\_weights\_ segregated\_workforce .Rdata};
+% not produced
+\node[missing] (J) at (13.7,-7.6) {age\_truncated\_data.Rdata\\(save commented out)};
+\node[missing] (K) at (13.7,-9.6) {segregated\_workforce .Rdata\\(never saved)};
+% consumers
+\node[script] (s5) at (5.4,-11.6)  {Supplementary 5\\Oaxaca-Blinder};
+\node[script] (s3) at (9.9,-11.6) {Supplementary 3\\main analysis};
+\node[script] (s4) at (14.8,-11.6) {Supplementary 4\\segregated workforce};
+
+\draw[flow] (raw) -- (s1);
+\foreach \n in {A,B,C,D,E} \draw[flow] (s1) -- (\n);
+\draw[flow] (A) -- (s2);
+\draw[flow] (B) -- (s2);
+\draw[flow] (s2) -- (I);
+\draw[flow] (s2) -- (F);
+\draw[notrun] (s2) -- (G);
+\draw[flow] (s2.south east) -- (H.north);
+\draw[flow] (F) -- (s5);
+\draw[flow] (G) -- (s5);
+\draw[flow] (H) -- (s3);
+\draw[flow] (D.south) -- ++(0,-0.4) -| ([xshift=1.3cm]s3.north);
+\draw[flow] (C.south) -- ++(0,-0.7) -| (12.0,-11.6) -- (s4.west);
+\draw[bad] (J) -- (s4);
+\draw[bad] (K) -- (s4);
+\end{tikzpicture}}
+\caption{Where each data file is created and loaded. Supplementary 4 currently loads two files that nothing saves.}
+\label{fig:dataflow}
+\end{figure}
+
+Points the diagram makes visible:
+
+1. The 500,000-row `Xtrain` sample (factor version) is now used by Supplementary 2 only to make the age-truncated copy that feeds Supplementary 5
+   (the estimators that used it in Supplementary 2 were removed).
+   Supplementary 3 and 4 never use the factor version.
+2. Everything in Supplementary 3 comes through `capped_weights_segregated_workforce.Rdata`, which is written near the end of Supplementary 2.
+3. The two age-truncated files are now saved by an executed chunk in Supplementary 2 (`save_age_truncated`).
+4. Supplementary 4 used to load `age_truncated_data.Rdata` and `segregated_workforce.Rdata`, which no file saves (they are March files of an
+   older pipeline, with different segment sizes). It now loads `capped_weights_segregated_workforce.Rdata`, like Supplementary 3, so the low, middle and
+   high propensity segments are the ones saved by Supplementary 2.
+5. `aipw.grf.scores.Rdata` is written but never loaded. `occupation_mapping_full_description.Rdata` is loaded by Supplementary 4.
+6. In the saved `occupation_mapping_full_description` (and in the copy in `variable_mappings.Rdata`) the column `description` was a *list* column,
+   because `occupation_description` is a list column in the raw data. `match()` on it returned a list and the occupation tables of Supplementary 4
+   broke ("length of 'dimnames' [2] not equal to array extent"). `create_mapping()` in Supplementary 1 now converts the description to a character
+   vector, so the mapping files must be regenerated by re-running that chunk. Until they are, Supplementary 4 converts the column when it loads it.
+
+# Were weights used, and how were they made?
+
+- The weight is the Census `weight` column of the PUMS data. `Supplementary_1` describes it as "statistical weight determined by the US Census Bureau
+  which aims to correct sampling bias". It ranges from 1 to about 2,100, with mean about 107 and median 84.
+- `Supplementary_1` saves two vectors: `weights_supplied` (the Census weights) and `weights_dummy` (all 1s), so weighting can be switched on and off.
+- `Supplementary_2` (lines 113--139) caps `weights_supplied` at its 95th percentile, `pmin(weight, quantile(weight, 0.95))`, "to prevent numerical
+  instability". The cap is computed on the full 1,061,763 sample, before the age restriction and the propensity trimming. The cap value is not recorded.
+- The capped weights are subsetted along with the data (ages 26 to 53, then $0.1 < \hat e(x) < 0.9$) and saved in `capped_weights_segregated_workforce.Rdata`,
+  which `Supplementary_3` loads.
+
+| Step | Weighted? |
+|---|---|
+| Difference in means, single RF, propensity RF (Supp 2) | yes (`case.weights`) |
+| IPW and manual AIPW (Supp 2) | yes, weighted mean and variance |
+| `causal_forest` (Supp 2 and 3) | yes (`sample.weights`) |
+| Separate forests `m1`, `m0` (Supp 3) | `case.weights` (sampling probabilities, not survey weights); the mean of the predictions is unweighted |
+| IPW in Supp 3 | propensity model weighted; mean of $z$ not |
+| Balance plots (Supp 3) | inverse propensity weighting only |
+| Descriptive medians and regressions of $\hat\tau$ on subgroups (Supp 3) | no |
+| Supp 4 (segments, regressions, counterfactual) | no |
+| Supp 5 (Oaxaca-Blinder) | no |
+| Reports, Supp 10 | no mention of weights |
+
+# Were weighted and unweighted analyses compared?
+
+Yes, in three places.
+
+1. `weights.Rmd` is a dedicated test, rewritten on the final age-truncated sample (659,436 people) with the weight kept out of the covariates. Raw weights changed the
+   difference in means by 7.9%, the IPW estimate by 7.5% and the regression coefficient by 5.0% (capped weights: 6.5%, 6.0%, 4.7%). The design effect is 1.64 for
+   the raw weights and 1.41 for the capped ones. The wage gap is smaller in the high-weight tenth (0.155) than in the low-weight tenth (0.207), and the weight-by-covariate
+   interactions are jointly significant (F = 68). Earlier versions of this file, on the 500,000 row `Xtrain`, gave the larger percentages quoted in older notes.
+2. The result comments in `Supplementary_2` record each estimate under four settings: unweighted, weighted, capped, and capped plus age-trimmed.
+   For example the difference in means is 0.208, 0.189, 0.191, 0.174, and the single-forest estimate is 0.116, 0.111, 0.111, 0.094.
+3. The trimming-sensitivity tables in `Supplementary_2` compare capped weights (ATE about 0.122), unweighted (about 0.110) and capped plus age-truncated
+   (about 0.125). The "unweighted" table has $N = 1{,}061{,}145$, not $1{,}061{,}763$, so it was produced from a slightly different dataset.
+
+The final age-truncated results exist only with capped weights, so every weighted-versus-unweighted comparison on that data is also a comparison with the
+earlier non-truncated runs.
+
+# Where was the decision made?
+
+- The evidence is `weights.Rmd`.
+- The switch is in `Supplementary_2` (comment "SET WEIGHT VECTOR HERE", `weight <- weights_supplied`).
+- The commit "modified Supplementary_2 Supplementary_3 to use weights" (`54e803e`) is where the change landed.
+- `Supplementary_2` (end of the calibration section) gives the only written justification: weights change variable importance, so a weight sensitivity
+  analysis is worthwhile. There is no passage that states which population the weighted analysis is meant to describe.
+
+# Is weighting appropriate?
+
+## What the weights are
+
+The PUMS file is not a simple random sample of the population. The weights reflect unequal selection probabilities, nonresponse adjustment, and
+calibration to population controls (age, sex, race, Hispanic origin). A weighted analysis targets the US population satisfying the eligibility rules.
+An unweighted analysis targets the sample. The two coincide only if either the weights are unrelated to the covariates, or the effect does not vary with
+the covariates that the weights are related to.
+
+The 8.8 to 9.1% change in the difference in means is therefore best read as a statement about heterogeneity (the effect varies with covariates that the
+weights correlate with, such as English level), not as evidence of bias. Because the substantive aim is heterogeneity (CATE, best linear projection,
+variable importance), an unweighted conditional analysis is defensible if the model conditions on the covariates that drive the weights. A headline
+population ATE is the number that needs the weights.
+
+## Two problems in the current evidence
+
+1. **(Resolved.)** The old "weights do not matter given $X$" test was an artefact: the weight was a regressor, so the correlation with the residuals was exactly
+   $0.0000$ ($p = 1.000$). `weights.Rmd` now keeps the weight out of the covariates and adds the DuMouchel and Duncan (1983) interaction test.
+2. **The 95th-percentile cap probably addresses a ranger artefact.** ranger's `case.weights` are bootstrap sampling probabilities, not observation
+   weights in the loss. Observation 695 in the control group has weight 855 against a mean of about 106, so the probability that it is out-of-bag in a
+   given tree is about $e^{-855/106} \approx 3 \times 10^{-4}$. With the default 500 trees it almost never has an OOB tree, which produces the `NaN`.
+   The `NaN`s cluster in `english_level = 0`, the group with the highest weights. grf's `causal_forest` enters `sample.weights` in its estimating
+   equations and does not have this problem, yet the cap is applied there too, and `Supplementary_2` records that it worsened differential calibration
+   (about 1.15 to 1.23). Separately, `predict(m3, data = Xtrain)` returned in-sample predictions, not OOB predictions as the comments said; Supplementary 3 now forms the counterfactual predictions from the out-of-bag trees only (`oob_predict()`).
+
+## Does subsetting make the weights inappropriate?
+
+Mostly no. The subsets in this pipeline are of different kinds.
+
+| Subset | Weights still valid? |
+|---|---|
+| Eligibility (age, weeks, hours, employed, not self-employed, ages 26 to 53) | Yes. This is standard subpopulation (domain) estimation. Point estimates need no renormalising and the target becomes that workforce. Weights correct for sampling, not for selection into employment, so they do not address that. |
+| Random subsample of 500,000 | Yes, it is an equal-probability subsample. |
+| Trimming on estimated propensity ($0.1 < \hat e < 0.9$) | Yes, as the overlap population of Crump, Hotz, Imbens and Mitnik (2009). The subset depends on how $\hat e$ was estimated. Supp 2 estimates it once with a seeded forest, and Supp 3, 4 and 5 all use that segmentation (575,120 mid-segment observations), so the subset is reproducible. |
+| Cap at the 95th percentile of the full sample | The weights stop being inverse selection probabilities. This is a bias-variance compromise, and the share of capped observations differs between subsets. |
+
+Standard errors need the full design (replicate weights PWGTP1 to PWGTP80 in PUMS, with the subset treated as a domain). Every standard error in the
+project currently treats the data as an iid sample. The "standard errors" attached to the direct forest estimators (pooled and separate
+forests, Supp 2 and 3) are worse than that: they are the variance of the predicted wages divided by $n$, which omits the residual variance and
+the forest's estimation error and ignores the correlation between predictions, so they are not valid. Only the AIPW standard errors
+(`average_treatment_effect()`) should be quoted.
+
+# Recommendations
+
+1. (Done: `weights.Rmd`.) 
+2. Report the headline ATE both weighted and unweighted, and state the target population for each.
+3. Document the cap value and the reason for it, or drop the cap for `causal_forest` and keep it only where ranger `case.weights` are used.
+5. Use the same propensity partition in Supplementary 3 and 4, and decide whether Supplementary 4 and 5 should be weighted.
+6. If replicate weights are available in the raw data, use them for standard errors.
+
+# References (from memory; please check)
+
+- DuMouchel, W. H. and Duncan, G. J. (1983). Using sample survey weights in multiple regression analyses of stratified samples. *JASA* 78, 535--543.
+- Solon, G., Haider, S. J. and Wooldridge, J. M. (2015). What are we weighting for? *Journal of Human Resources* 50, 301--316.
+- Crump, R., Hotz, V. J., Imbens, G. and Mitnik, O. (2009). Dealing with limited overlap in estimation of average treatment effects. *Biometrika* 96, 187--199.

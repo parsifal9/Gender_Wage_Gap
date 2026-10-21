@@ -1,0 +1,56 @@
+test	result	detail
+data: about 575,000 rows (570,000 to 580,000) and 13 numeric columns	PASS	
+data: no missing values, and Y, W and weights have one value per row	PASS	
+data: W is 0/1 and men are 50 to 54 percent of the rows	PASS	
+data: ages are 26 to 53 and the weights are positive	PASS	
+industry: 269 codes present, and the mapping has 269 rows in code order with Car washes as code 1	PASS	
+difference in means: equals the weighted raw gap and is between 0.15 and 0.22	PASS	
+direct: the separate-forest estimate is within 0.01 of the raw gap, as the text says	PASS	
+direct: the OOB prediction at the observed W reproduces ranger's own OOB predictions	PASS	
+direct: the pooled-forest estimate is between 0.10 and 0.20	PASS	
+hajek_ate recovers a known effect (2) in simulated data, within 4 standard errors	PASS	
+hajek_ate does not change when the propensity-type weights are all multiplied by a constant	PASS	
+AIPW: the average treatment effect for all is between 0.12 and 0.15, with standard error below 0.005	PASS	
+AIPW: the effect for the control group (women) is below the effect for all, which is below the effect for the treated (men)	PASS	
+AIPW: the overlap-population effect is within 0.01 of the effect for all	PASS	
+AIPW: the forest propensities are strictly between 0 and 1 and there are no NaN scores	PASS	
+AIPW: fewer than 3% of the forest propensities are outside [0.1, 0.9] (the text says 1.4%)	PASS	
+IPW (Hajek) and AIPW estimates for all agree to within 0.02	PASS	
+IPW: the truncated propensities are in [0.1, 0.9] and fewer than 5% of them were truncated	PASS	
+calibration: the mean forest prediction is within 2 standard errors of 1	PASS	
+calibration: the differential forest prediction is above 0.8 (heterogeneity is detected) and within 2.5 standard errors of 1	PASS	
+balance: all adjusted standardized differences are below 0.1	PASS	
+balance: every covariate that was above 0.1 before adjustment is smaller after it	PASS	
+balance: before adjustment exactly occupation and education_level are above 0.1 (as the text says)	PASS	
+BLP: 13 covariates and an intercept	PASS	
+BLP: age, marital and children have positive coefficients and education_level a negative one, all significant (as the text says)	PASS	
+BLP: industry, family_size and nativity are not significant at 5% (as the text says)	PASS	
+BLP: the age effect over the 27 years from 26 to 53 is between 0.08 and 0.10 (the text says 9 percentage points)	PASS	
+variable importance: the importances sum to 1	PASS	
+variable importance: marital, education_level and age are the three most important, in that order (as the text says)	PASS	
+variable importance: marital is above 0.5, children is 4th and occupation 5th	PASS	
+Romano-Wolf: adjusted p-values are in [0, 1] and non-decreasing along the ordering of the t-statistics	PASS	
+marital: the estimates are the group means of tau.hat	PASS	
+marital: never married has the smallest gap and married the largest	PASS	
+age: the simple age coefficient is positive and larger than the best linear projection coefficient (as the text says)	PASS	
+age: the full-model age coefficient is within 25% of the best linear projection coefficient	PASS	
+age: the quadratic maximum is above 53, and the quadratic adds less than 0.02 to R-squared	PASS	
+age: the mean predicted gap increases from age 26 to age 50 (it rises in at least 80 percent of the yearly steps)	PASS	
+industry: the coefficient names agree with the mapping codes, so the positional pairing is right	PASS	
+industry: the effect for the reference class (Car washes) equals the mean of tau.hat in code 1	PASS	
+industry: 32 industries and the reference class are shown, and the estimates are sorted	PASS	
+education: the estimates are the group means of tau.hat, for 24 levels	PASS	
+education: the gap at 24 years is at least 0.05 below the gap at 16 years, and the highest estimate is at 9 years (as the text says)	PASS	
+children: the table (intercept + coefficient) equals the group means used in the figure	PASS	
+children: the gap increases with the number of children from 0 to 3 and is about 0.11, 0.15, 0.18, 0.19 (as the text says)	PASS	
+children: there are fewer than 100 people with 9 or more children (the estimates are not interpreted)	PASS	
+age x marital: 45 cells; the cells with fewer than 100 people are two, with 134 people (0.02%)	PASS	
+age x marital: at ages 26-28 about 31% are married, 1% separated, 2.6% divorced and 0.08% widowed (as the text says)	PASS	
+age x marital: R-squared increases along the four models	PASS	
+age x marital: the married x age coefficient is positive (the gap of the married grows with age)	PASS	
+age x marital: the gap of the married is above that of the never married in every age group, and grows by more than 0.05 from 26-28 to 50-53	PASS	
+parenthood: all 28 ages with 8 groups are present (every cell has at least 20 people)	PASS	
+parenthood: married mothers earn less than childless women at 26 and more at 40 (a penalty only at the youngest ages)	PASS	
+parenthood: married fathers earn less than childless men at 26 and more at 40 (a premium from the 30s)	PASS	
+parenthood: the gender gap among the married is larger with children than without, on average over ages 35 to 50	PASS	
+figures: every figure included in the document exists and is not empty (larger than 5 KB)	PASS	

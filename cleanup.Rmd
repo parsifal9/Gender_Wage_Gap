@@ -1,0 +1,222 @@
+---
+title: "Cleaning up and archiving the Gender_Wage_Gap project"
+author: "Rob Dunne"
+date: "Sunday, October 18, 2026"
+output:
+    pdf_document:
+     toc: true
+---
+
+<!--
+These are shell commands to be pasted one block at a time into a terminal, in the project directory. Nothing is run when this file is knitted
+(every chunk has eval=FALSE). Each deleting step is preceded by a listing of what it would delete: run the listing first.
+
+Written 18 October 2026 from a listing of the directory at that date. Check the lists before you delete, because the directory will have changed.
+-->
+
+# Before starting
+
+```{bash, eval=FALSE}
+cd <project directory>
+git status --short | head -50        # what is not committed
+du -sh . ; du -sh * .[!.]* 2>/dev/null | sort -h | tail -12
+```
+
+Nothing in this file touches `.git`, the `.Rmd` sources, `wageinequality.bib`, the figures of the Supplementary files, the US census code tables or the `.Rdata` results files
+(`Supplementary_N_results.Rdata`, which are small and are what lets a PDF be made without the data).
+
+Things that look like clutter but are **sources** and are kept: `Notes.tex`, `readme_header.tex`, `longtable_occupation_categories.tex`, `Discussion.Rmd`, `PUBS_Data_Description.Rmd`.
+
+# Emacs files
+
+Backup files (`name~`), auto-save files (`#name#`) and lock files (`.#name`, which are dangling symbolic links). Close emacs first, or the lock files come back.
+
+```{bash, eval=FALSE}
+# list
+find . -path ./.git -prune -o \( -name '*~' -o -name '#*#' -o -name '.#*' \) -print
+# remove
+find . -path ./.git -prune -o \( -name '*~' -o -name '#*#' -o -name '.#*' \) -exec rm -f {} +
+```
+
+At the time of writing: `weights.Rmd~`, `Notes.tex~`, `#!home!dun280!Downloads!Gender_Wage_Gap!aa#`, `#!home!dun280!Downloads!Gender_Wage_Gap!handling_categorical_variables.Rmd#`,
+`.#handling_categorical_variables.Rmd`.
+
+# LaTeX and knitr processing files
+
+The files made on the way to a PDF. The PDFs are kept (see the optional section for removing them).
+
+```{bash, eval=FALSE}
+# list
+find . -path ./.git -prune -o \( -name '*.aux' -o -name '*.bbl' -o -name '*.bcf' -o -name '*.blg' -o -name '*.log' -o -name '*.out' \
+     -o -name '*.toc' -o -name '*.lof' -o -name '*.lot' -o -name '*.run.xml' -o -name '*.fls' -o -name '*.fdb_latexmk' \
+     -o -name '*.synctex.gz' -o -name '*.nav' -o -name '*.snm' -o -name '*.vrb' -o -name '*.knit.md' \) -print
+# remove
+find . -path ./.git -prune -o \( -name '*.aux' -o -name '*.bbl' -o -name '*.bcf' -o -name '*.blg' -o -name '*.log' -o -name '*.out' \
+     -o -name '*.toc' -o -name '*.lof' -o -name '*.lot' -o -name '*.run.xml' -o -name '*.fls' -o -name '*.fdb_latexmk' \
+     -o -name '*.synctex.gz' -o -name '*.nav' -o -name '*.snm' -o -name '*.vrb' -o -name '*.knit.md' \) -exec rm -f {} +
+```
+
+The `.tex` files made by knitting are removed by name (the other `.tex` files are sources), together with the knitr figure folder and caches.
+`Supplementary_4_segregated_workforce_files/` is tracked in git, so git will show it as deleted.
+
+```{bash, eval=FALSE}
+ls -d Supplementary_3_Analysis.tex Supplementary_4_segregated_workforce.tex \
+      Supplementary_4_segregated_workforce_files *_cache 2>/dev/null
+rm -f  Supplementary_3_Analysis.tex Supplementary_4_segregated_workforce.tex
+rm -rf Supplementary_4_segregated_workforce_files *_cache
+```
+
+# The intermediate data
+
+`processing_files/` holds the two files made by Supplementary 1, and (on the HPC) the files made by Supplementary 2. `processing_files_temp/` is empty. There is no `temp_processing_files/`
+at present (the README mentions it).
+
+**The two Supplementary 1 files can be recreated only by running Supplementary 1 on the HPC with the raw PUMS data.** In Supplementary 1 the line that saves
+`X_ordered_numeric_1061763_industry_269.Rdata` is commented out (`#save(Y, W, X_ordered_numeric, ...)`), so check how that file was made before relying on re-creating it.
+Archive first. The archive below is about 20 MB.
+
+```{bash, eval=FALSE}
+ls -la processing_files processing_files_temp temp_processing_files 2>/dev/null
+# archive
+tar czf ../Gender_Wage_Gap_processing_files_$(date +%Y%m%d).tgz processing_files
+tar tzf ../Gender_Wage_Gap_processing_files_$(date +%Y%m%d).tgz            # check that it lists the files
+```
+
+```{bash, eval=FALSE}
+# empty the directories (keep the directory itself, which the Rmd files expect)
+rm -f processing_files/* processing_files_temp/* temp_processing_files/* 2>/dev/null
+# or remove the empty ones:
+# rmdir processing_files_temp temp_processing_files 2>/dev/null
+```
+
+On the HPC, the same applies to its `processing_files/` (which holds `capped_weights_segregated_workforce.Rdata`, `numeric_age_truncated_data.Rdata`
+and `X_age_truncated_data.Rdata` as well). Those three are rebuilt by Supplementary 2.
+
+# Other files that can be dropped
+
+Each of these is listed with the reason.
+
+| File | Reason |
+|------|--------|
+| `aa` | a copy of an early version of Supplementary 3 (identical to its emacs auto-save file) |
+| `.Rhistory` | R command history |
+| `Supplementary_3_checks.txt` | output of ad hoc checks made on 15 October; the tests now write `Supplementary_3_tests.txt` |
+| `README.pdf` | made from `README.md` (see below to remake it) |
+| `Supplementary_4_segregated_workforce.log`, `Supplementary_4_segregated_workforce.pdf` | February 2026 outputs; remake the PDF by running the file |
+| `gender_wage_gap_report_brief.Rmd` | `report_brief.Rmd` as it was before the October 2026 edits (old numbers, `~/script8.6` figures, Dropbox `.bib`); it is in git, so it can be removed |
+
+```{bash, eval=FALSE}
+ls -la aa .Rhistory Supplementary_3_checks.txt README.pdf Supplementary_4_segregated_workforce.log Supplementary_4_segregated_workforce.pdf gender_wage_gap_report_brief.Rmd
+diff gender_wage_gap_report_brief.Rmd report_brief.Rmd | head -20    # only the October edits should differ
+```
+
+```{bash, eval=FALSE}
+rm -f aa .Rhistory Supplementary_3_checks.txt README.pdf Supplementary_4_segregated_workforce.log Supplementary_4_segregated_workforce.pdf
+# rm -f gender_wage_gap_report_brief.Rmd             # the README mentions it, so edit the README too
+```
+
+## Figures that no `.Rmd` refers to (check, then decide)
+
+The figures are tracked in git, so their history is kept if you delete them. These are not mentioned in any `.Rmd` or `.md` anywhere:
+
+- `Supplementary_2_figs/`: `capped_weighted_propensities_hstogram.png`
+- `Supplementary_3_figs/`: `Age_Distribution_by_Parental_Status.png`, `age_martial_interactions_filtered_old.png`, `age_martial_interctions.png`, `children_old.png`,
+  `education_old.png`, `industry_absolute_old.png`, `industry.png`, `industrypng`, `parenthood_wage_gaps_old.png`, `propensities.png`, `propensity_parent.png`, `forest_tau_predictions.Rdata`
+- `report_figs/` and `report_brief_figs/` were checked only against the reports.
+
+```{bash, eval=FALSE}
+cd Supplementary_3_figs
+ls -la Age_Distribution_by_Parental_Status.png age_martial_interactions_filtered_old.png age_martial_interctions.png children_old.png education_old.png \
+       industry_absolute_old.png industry.png industrypng parenthood_wage_gaps_old.png propensities.png propensity_parent.png forest_tau_predictions.Rdata
+# rm -f Age_Distribution_by_Parental_Status.png age_martial_interactions_filtered_old.png age_martial_interctions.png children_old.png education_old.png \
+#       industry_absolute_old.png industry.png industrypng parenthood_wage_gaps_old.png propensities.png propensity_parent.png forest_tau_predictions.Rdata
+cd ..
+```
+
+(`Supplementary_3_figs/married_wage_by_parenthood.png` used to be an old hand-made figure with no chunk that made it. Supplementary 3 now makes it (chunk `figure_married_wage`), so it can be deleted with the other figures and is regenerated when `fig_eval_flag` is TRUE.)
+
+# Optional: the PDFs
+
+The PDFs are the readable outputs and are not needed to rebuild anything. Remove them only for the smallest archive.
+
+```{bash, eval=FALSE}
+ls -la *.pdf
+# rm -f *.pdf
+```
+
+# What the project directory looks like afterwards
+
+```{bash, eval=FALSE}
+ls
+git status --short
+du -sh .
+```
+
+# Regenerating the analysis
+
+The raw PUMS data are on the HPC (the path is `wage_data_dir` in Supplementary 1). Start an interactive session and load the tools, then run the files **from the project directory**, in this order.
+All Supplementary files have a flag `eval_flag` in their setup chunk (TRUE runs the analysis; FALSE only knits from the saved results).
+
+```{bash, eval=FALSE}
+salloc --account=<ACCOUNT> --mem=120GB --nodes=1 --ntasks=1 --cpus-per-task=32 -J interactive -t 4:00:00 srun --cpus-per-task=32 --pty /bin/bash -l
+module load pandoc texlive
+cd /path/to/Gender_Wage_Gap
+```
+
+**Step 1. Supplementary 1** reads the raw data and writes `processing_files/Xtrain_500000_20.Rdata`, `X_ordered_numeric_1061763_industry_269.Rdata` and the mapping files,
+and also `Supplementary_1_results.Rdata`, `Supplementary_1_tests.txt`, `Supplementary_1_session.txt` and `Supplementary_1_figs/`. It needs the raw `wage_data.Rdata`
+(see `wage_data_dir` in the file, or set the environment variable `WAGE_DATA_DIR`). It writes the time of each step to the console, so a long load can be told from a hang.
+
+```{bash, eval=FALSE}
+Rscript -e 'rmarkdown::render("Supplementary_1_The_PUBS_data_and_preprocessing.Rmd")' 2>&1 | tee Supplementary_1_run.log
+```
+
+**Step 2. Supplementary 2** (the long one; the forests are fitted on 659,436 rows). Writes `capped_weights_segregated_workforce.Rdata`, `numeric_age_truncated_data.Rdata`,
+`X_age_truncated_data.Rdata`, `Supplementary_2_results.Rdata` and `Supplementary_2_tests.txt`.
+
+```{bash, eval=FALSE}
+Rscript -e 'rmarkdown::render("Supplementary_2_First_Look_at_the_Data.Rmd")' 2>&1 | tee Supplementary_2_run.log
+```
+
+**Step 3. Supplementary 3, 4 and 5** (any order; each needs only the files of step 2, and Supplementary 5 also reads `Supplementary_3_results.Rdata` if it exists, so run 3 before 5).
+
+```{bash, eval=FALSE}
+Rscript -e 'rmarkdown::render("Supplementary_3_Analysis.Rmd")' 2>&1 | tee Supplementary_3_run.log
+Rscript -e 'rmarkdown::render("Supplementary_4_segregated_workforce.Rmd")' 2>&1 | tee Supplementary_4_run.log
+Rscript -e 'rmarkdown::render("Supplementary_5_Oaxaca-Blinder_Decomposition.Rmd")' 2>&1 | tee Supplementary_5_run.log
+```
+
+**Step 4. The two side documents** (need only the files of Supplementary 1; they take about a minute and six minutes).
+
+```{bash, eval=FALSE}
+Rscript -e 'rmarkdown::render("weights.Rmd")'
+Rscript -e 'rmarkdown::render("handling_categorical_variables.Rmd")'
+```
+
+**Step 5. Documents with no computation, the instructions and the README.**
+
+```{bash, eval=FALSE}
+Rscript -e 'rmarkdown::render("Supplementary_10_Some_background_on_Causal_Analysis.Rmd")'
+Rscript -e 'rmarkdown::render("Discussion.Rmd")'
+Rscript -e 'rmarkdown::render("Instructions.Rmd")'
+pandoc README.md -H readme_header.tex -o README.pdf
+```
+
+The three reports read the `Supplementary_{2,3,4,5}_results.Rdata` and `weights_results.Rdata` files, so they must come after steps 2 to 4. They need
+LaTeX with biber (check with `which biber pdflatex`; if the HPC does not have them, knit the reports on your own machine after copying the results files back).
+
+```{bash, eval=FALSE}
+Rscript -e 'rmarkdown::render("report.Rmd")'
+Rscript -e 'rmarkdown::render("report_brief.Rmd")'
+Rscript -e 'rmarkdown::render("report_beamer.Rmd")'
+```
+
+**Step 6. Check that the tests pass.**
+
+```{bash, eval=FALSE}
+grep -c PASS *_tests.txt
+grep -n FAIL *_tests.txt || echo "no failures"
+```
+
+To knit the text and tables again from the saved results, without the data, set `eval_flag <- FALSE` in the setup chunk of the file (or use a copy with
+`sed 's/^eval_flag <- TRUE/eval_flag <- FALSE/' file.Rmd > file_text.Rmd`). The results files and the `Supplementary_N_figs/` folders must be present.

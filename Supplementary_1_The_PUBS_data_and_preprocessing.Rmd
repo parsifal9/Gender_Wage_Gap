@@ -1,0 +1,1468 @@
+---
+title:  "Preparing the PUMS data"
+author: "Rob Dunne"
+date: "Tuesday, November  5, 2024"
+output: 
+    bookdown::pdf_document2:
+     geometry: a4paper
+     toc: true
+     toc_depth: 3
+     fig_caption: yes
+     citation_package: biblatex
+     biblio-style: "apalike"
+     biblatexoptions: [backend=biber, maxbibnames=999]
+bibliography: 
+    - wageinequality.bib
+header-includes:
+   - |
+     \usepackage{dcolumn}
+     \usepackage{placeins}
+     \usepackage{float}
+     \usepackage{ltablex}
+     \usepackage{array} 
+     \usepackage{caption}
+     \usepackage{subcaption}
+     \usepackage{rotating}
+     \usepackage{csquotes}
+     \DeclareMathOperator{\E}{E}
+     \newcommand{\hGamma}{\widehat{\Gamma}}
+     \newcommand{\htau}{\widehat{\tau}}
+     \DeclareMathOperator{\PP}{P}
+     \newcommand{\hmu}{\hat{\mu}}
+     \newcommand{\he}{\widehat{e}}
+     \newcommand{\p}{\widehat{e}}
+     \newcolumntype{Y}{>{\raggedright\arraybackslash}X} 
+---
+
+
+<!--
+INPUT FILES:
+  wage_data_dir/wage_data.Rdata    the raw PUMS data (object `wage`, 3,214,539 rows, 25 columns). wage_data_dir is set in the chunk "paths" below: set the
+                                   environment variable WAGE_DATA_DIR to the directory that contains it (it has no default).
+
+OUTPUT FILES (written to wage_file_outputs <- "./processing_files/", which is created if it does not exist):
+  Xtrain_500000_20.Rdata                           Xtrain, W, Y, weights_supplied, weights_dummy: random sample of 500,000 rows (occupation 23 levels, industry 20 levels)
+  X_ordered_numeric_1061763_industry_269.Rdata     Y, W, X_ordered_numeric, weights_supplied, weights_dummy: the full sample, 13 numeric covariates
+  industry_mapping_full_description.Rdata, occupation_mapping_full_description.Rdata, variable_mappings.Rdata    numeric code -> description
+  Supplementary_1_results.Rdata                    the list res: the counts behind the text and the tests
+  Supplementary_1_tests.txt, Supplementary_1_session.txt    test results and session information
+  Supplementary_1_figs/                            wage by code plots (only if fig_eval_flag)
+
+FLAGS (set in the setup chunk):
+  eval_flag      TRUE runs the processing chunks (needs the raw data and about 20 GB of memory). FALSE only knits the text.
+  fig_eval_flag  TRUE writes the diagnostic plots to Supplementary_1_figs/.
+  The chunks with eval=FALSE are old or exploratory code that is kept for reference (they are not run).
+
+UNIT TESTS: chunks named tests_* call run_test("description", { testthat::expect_...() }). The results are listed by the last chunk and written to
+  Supplementary_1_tests.txt. A failing test means that a number in the text, or an assumption of the later files, no longer holds.
+
+PROGRESS: step("message") writes the time and a message to the console (stderr), so a long run shows where it is. rmarkdown prints a chunk label only when
+  the chunk starts, so a slow load or a slow step looks like a hang.
+
+HPC: salloc --account=<ACCOUNT> --mem=120GB --nodes=1 --ntasks=1 --cpus-per-task=32 -J interactive -t 4:00:00 srun --cpus-per-task=32 --pty /bin/bash -l
+     module load pandoc texlive
+     Rscript -e 'rmarkdown::render("Supplementary_1_The_PUBS_data_and_preprocessing.Rmd")'
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=6, dpi=300,echo = FALSE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+
+# eval_flag: TRUE runs the processing chunks. FALSE knits only the text.
+# fig_eval_flag: TRUE writes the diagnostic plots to Supplementary_1_figs/.
+eval_flag <- TRUE
+fig_eval_flag <- TRUE
+if (!eval_flag) fig_eval_flag <- FALSE
+
+test_log <- "Supplementary_1_tests.txt"
+results_file <- "Supplementary_1_results.Rdata"
+res <- list()   # the counts behind the text and the tests; saved at the end
+test_results <- data.frame(test = character(), result = character(), detail = character(), stringsAsFactors = FALSE)
+run_test <- function(description, code) {
+  detail <- tryCatch({ force(code); "" }, error = function(e) conditionMessage(e))
+  result <- if (identical(detail, "")) "PASS" else "FAIL"
+  test_results[nrow(test_results) + 1, ] <<- c(description, result, detail)
+  cat(sprintf("[%s] %s\n", result, description))
+  if (result == "FAIL") cat("       ", detail, "\n")
+  invisible(result == "PASS")
+}
+# progress messages go to stderr, which knitr does not capture, so they show on the console during a long run
+step <- function(msg) cat(format(Sys.time(), "%H:%M:%S"), " ", msg, "\n", sep = "", file = stderr())
+
+```
+
+```{R, echo=FALSE, eval=TRUE} 
+options(width=160)
+library(xtable)
+
+library(dplyr)
+library(testthat)
+
+```
+
+
+
+# the PUMS wage data. 
+
+We take wage data from the 2018 American Community Survey by the US Census Bureau and using this we analyze the gender wage gap. See
+@nafStudyingGenderWage2023, which inspired this work.
+
+The PUMS (Public Use Microdata Area) data from the 2018 1-Year American Community Survey is obtained from the US Census
+Bureau. The  API is described [here](https://www.census.gov/content/dam/Census/data/developers/api-user-guide/api-guide.pdf).
+
+The survey is sent to $\approx$ 3.5 million people annually and aims to give more up to date data than the official census that is carried out every
+decade. The 2018 data set has 3,2140,539 anonymized data points for the 51 states and District of Columbia.  relevant for the salaries:
+
+-  person's gender, age, race (AIAN, black, white, asian, mix, NHOPI, other), indicator of hispanic origin, state of residence, US citizenship
+indicator (5 ordered levels), indicator whether the person is foreign-born
+- person's marital status, number of own children in the same household and the number of family members in the same household
+- for employed people we have annual salary earnings, number of weeks worked in a year and average number of hours worked per week
+- for employed people we have employer type (government, non-profit company, for-profit company, self-employed), occupation (530 levels), industry
+where the person works (271 levels) and the geographical unit where the person works (59 levels)
+- statistical weight determined by the US Census Bureau which aims to correct sampling bias
+
+Since we want to analyze the gender pay gap, we consider only employed people that
+are at least 17 years of age, have worked full-time (at least 48 weeks in a year) and have worked at least 16 hours a
+week on average. We also omit the self-employed persons, since they often report zero annual salary and the pay gap
+there, if exists, cannot be called unfair as the salary is not determined by any employer. Since there are no missing
+data which would need to be omitted, we finally end up with 1,061,763  data points. 
+
+We scale the salary with the amount of time spent working (determined from the number of weeks worked and average
+hours worked per week) to compute the logarithm of the hourly wages. The scaling with the time spent working used as 
+full-time employed men spend on average 11\% more time working than women. The logarithmic
+transformation is used since the salaries are very skewed (positively) and logarithmic wages show nice behavior.
+
+## handling discrete and continuous variables
+
+Table \ref{table:variables} shows the variables in the processed data. There is a mixture of continuous and discrete variables. 
+
+- education had 23 levels. However, we mapped them to a continuous variable which we roughly take to be an approximation to years of schooling. See table \@ref(table:educationlevel)
+- For some parts of the analysis we reduce the large number of levels of some of the categorical variables: 
+
+   - for the occupation we use the group of 530 jobs into 20 categories provided in the SOC system (https://www.bls.gov/soc/), See table
+\@ref(table:20industryCategories)
+   - for the industry information we group the 271 possibilities in 23 categories as is done in the NIACS classification
+(https://www.bls.gov/bls/naics.htm);
+   - for the work place we group the 59 US states and foreign territories into 9 economic regions (including the "abroad" category), as determined by
+   the Bureau of the Economic Analysis (https://apps.bea.gov/regional/docs/regions.cfm).
+
+
+
+
+```{R paths, echo=TRUE, eval=TRUE}
+#load(url("https://raw.githubusercontent.com/lorismichel/drf/master/applications/wage_data/data/datasets/wage_data.Rdata"))
+# PATHS (must be set): wage_data_dir is the directory that contains wage_data.Rdata (the raw PUMS data). Set the environment
+# variable WAGE_DATA_DIR (e.g. export WAGE_DATA_DIR=/path/to/data/ before starting R) or edit the default below.
+# Run this file from the project directory; wage_file_outputs is where the intermediate .Rdata files are written.
+wage_data_dir <- Sys.getenv("WAGE_DATA_DIR", unset = "<SET WAGE_DATA_DIR: directory containing wage_data.Rdata>")
+if (eval_flag && !file.exists(file.path(wage_data_dir, "wage_data.Rdata")))
+  stop("wage_data.Rdata not found in '", wage_data_dir, "'. Set the environment variable WAGE_DATA_DIR (see the chunk 'paths').")
+wage_file_outputs <- "./processing_files/"
+if (eval_flag) dir.create(wage_file_outputs, showWarnings = FALSE)
+
+```
+
+## the raw data
+
+```{R rawdata, echo=TRUE, eval=eval_flag}
+step("loading the raw data")
+load(paste(wage_data_dir, "wage_data.Rdata", sep="")) # if you have the data local
+step("raw data loaded")
+dim(wage)# [1] 3214539      25
+res$n_raw <- nrow(wage)
+wage[1:4,1:8]
+#     sex age  race hispanic_origin citizenship nativity       marital family_size 
+#1   male   5 white              no           1   native never married           3 
+#2   male  11 white              no           1   native never married           3 
+#3 female  47 white              no           1   native      divorced           3 
+#4   male  70 white              no           1   native       married           2 
+
+which = rep(TRUE, nrow(wage))
+which = which & (wage$age >= 17)
+which = which & (wage$weeks_worked > 48)
+which = which & (wage$hours_worked > 16)
+which = which & (wage$employment_status == 'employed')
+which = which & (wage$employer != 'self-employed')
+which[is.na(which)] = FALSE
+table(which)
+res$n_selected <- sum(which)
+#   which
+#  FALSE    TRUE 
+#2142673 1071866 
+
+step("selecting the rows")
+wage$industry_description<- unlist(wage$industry_description)
+
+data = wage[which, ]  #1071866      25
+sum(is.na(data)) #0
+colSums(is.na(data))
+
+# OK there was a problem here. The value "-1" was used by the "children" variable to denote a missing value.
+sum(data$children==-1) #[1] 10103
+res$n_children_missing <- sum(data$children==-1)
+step("replacing the missing-value code -1 by NA and dropping those rows")
+# (done column by column on the numeric columns: data[data == -1] on the whole data frame builds a 1,000,000 x 25 matrix and is very slow
+#  when there are list columns)
+for (v in names(data)[vapply(data, is.numeric, NA)]) data[[v]][data[[v]] == -1] <- NA
+keep <- complete.cases(data[!vapply(data, is.list, NA)])
+data <- data[keep, ]
+rownames(data) = 1:nrow(data)
+dim(data) # 1061763      25
+
+sum(data$industry == "", na.rm=TRUE)  # How many empty strings?
+# 0
+sum(is.na(data$industry))              # How many true NAs?
+# 0
+head(levels(data$industry))
+#[1] ""     "111"  "112"  "1133" "113M" "114" 
+#No actual data rows have industry == "" (that's why the sum is 0)
+# But "" exists as an unused factor level
+
+data$industry <- droplevels(data$industry)
+
+table(unlist(lapply(data,class)))
+which(lapply(data,class)=="character") #education 
+which(lapply(data,class)=="list") #occupation_description   industry_description 
+which(lapply(data,class)=="factor") #sex  race   hispanic_origin nativity  marital state employment_status  occupation industry  employer  place_of_work   economic_region 
+which(lapply(data,class)=="numeric") #age citizenship family_size children education_level english_level  salary  hours_worked   weeks_worked    weight 
+
+head(levels(data$industry))
+
+data$occupation_description[(which(data$occupation=="55-9830"))][1]
+#[1] "Military, rank not specified"
+
+data$occupation_description[(which(data$occupation=="999920"))][1]
+#NULL
+
+# Note: Using occupation_description from PUMS data rather than 
+# 2018-occupation-code-list-and-crosswalk.xlsx because:
+# 1. PUMS data includes military occupations (55-9830) not in crosswalk
+# 2. Some codes in crosswalk (999920) don't appear in actual data
+# droplevels() removes unused codes like 999920
+
+data$occupation <- droplevels(data$occupation)
+data$industry <- droplevels(data$industry)
+dim(data) #[1] 1061763      25
+res$n_final <- nrow(data)
+step("the data set is ready")
+
+```
+
+```{r tests_data, echo=FALSE, eval=eval_flag, results='hide'}
+run_test("raw data: 3,214,539 rows and 25 columns", {
+  expect_equal(res$n_raw, 3214539)
+  expect_equal(ncol(wage), 25)
+})
+run_test("selection: 1,071,866 people are employed full time (age >= 17, weeks > 48, hours > 16, not self-employed)", {
+  expect_equal(res$n_selected, 1071866)
+})
+run_test("missing values: 10,103 people with children == -1 (the missing-value code) are dropped, leaving 1,061,763", {
+  expect_equal(res$n_children_missing, 10103)
+  expect_equal(res$n_final, 1061763)
+  expect_equal(nrow(data), 1061763)
+})
+run_test("data: no missing values, no -1 codes, and the selection rules hold in every row", {
+  nl <- data[!vapply(data, is.list, NA)]
+  expect_equal(sum(is.na(nl)), 0)
+  expect_equal(sum(data$children == -1), 0)
+  expect_true(all(data$age >= 17))
+  expect_true(all(data$weeks_worked > 48))
+  expect_true(all(data$hours_worked > 16))
+  expect_true(all(data$employment_status == "employed"))
+  expect_true(all(data$employer != "self-employed"))
+  expect_true(all(data$salary > 0))
+})
+run_test("data: both genders are present, occupation has 529 levels and industry 269 (no unused levels)", {
+  expect_equal(sort(unique(as.character(data$sex))), c("female", "male"))
+  expect_equal(nlevels(data$occupation), 529)
+  expect_equal(nlevels(data$industry), 269)
+  expect_false("" %in% levels(data$industry))
+})
+run_test("data: the occupation and industry descriptions are available for every row", {
+  expect_equal(length(data$occupation_description), nrow(data))
+  expect_equal(length(data$industry_description), nrow(data))
+})
+run_test("data: the 24 education levels are all used, and each one has a single education_level (years of schooling)", {
+  expect_equal(length(unique(data$education)), 24)
+  expect_equal(sum(table(data$education)), 1061763)
+  expect_true(all(rowSums(table(data$education, data$education_level) > 0) == 1))
+})
+```
+
+
+
+```{R,echo=FALSE, eval=FALSE}
+#skip this
+# could do some recoding to collapse some categories into 1. Have not done this
+#"Kindergarten"       "Nursery school, preschool"
+#"Regular high school diploma"        "GED or alternative credential"     
+#"Master's degree"            "Professional degree beyond a bachelor's degree"
+
+char_vec <- sample(c("a", "b", "c"), 10, replace = TRUE)
+
+# `recode()` is superseded by `case_match()`
+recode(char_vec, a = "1", b = "2")
+#
+recode(data$education, a = "Apple", b = "Banana")
+
+```
+
+# set up Xtrain 
+
+- with occupation reduced to 23 levels and industry reduced to 20 levels
+- save as Xtrain_500000_20.Rdata
+- not generating or using Xtest at the moment
+
+```{R xtrain_setup, echo=FALSE, eval=eval_flag}
+step("setting up Xtrain (23 occupation and 20 industry levels)")
+data$log_wage = log(data$salary / (data$weeks_worked * data$hours_worked))
+X  <- data[,c(
+    'sex',
+  'log_wage',
+  'age',
+  'race',
+  'hispanic_origin',
+  'citizenship',
+  'nativity', 
+  'marital',
+  'family_size',
+  'children',
+  'education_level',
+  'english_level',
+  'economic_region',
+  'weight'
+)]
+
+
+X$occupation  <- unlist(lapply(as.character(data$occupation), function(s){return(substr(s, 1, 2))})) #returns the first 2 characters of the occupation code i.e
+#  13-2011 becomes 13
+X$occupation  <- as.factor(X$occupation) #reduced occupation 530 levels to 23 levels
+
+#add  industry and reduce the levels from 271 to 20
+
+# Industry codes are 2 digits long. The first digit represents the sector, and the second digit represents the subsector.
+# We will use the first digit to reduce the number of levels from 271 to 20.
+# We will also combine some subsectors that are similar. For example, we will combine subsectors 32 and 33 into sector 31.
+# We will also combine subsectors 42 and 44 into sector 41, subsectors 45 and 44 into sector 44, subsectors 49 and 48 into sector 48, and subsectors 92 and 91 into sector 91.
+
+X$industry  <- unlist(lapply(as.character(data$industry), function(s){return(substr(s, 1, 2))})) #strip the classification to the first 2 numbers. This reduces it to 26 categories
+X$industry[X$industry %in% c('32', '33', '3M')] = '31'
+X$industry[X$industry %in% c('42')] = '41'
+X$industry[X$industry %in% c('45', '4M')] = '44'
+X$industry[X$industry %in% c('49')] = '48'
+X$industry[X$industry %in% c('92')] = '91'
+X$industry  <- as.factor(X$industry)
+
+```
+
+
+
+```{R xtrain_save, echo=FALSE, eval=eval_flag}
+# process the other variables
+
+X$citizenship <-as.factor(X$citizenship)
+X$sex <-as.factor(X$sex)
+
+#
+#X$english_level <- as.factor(X$english_level) #is this correct. No treat english_level as a numeric variable (years of schooling)
+X$economic_region <-as.factor(X$economic_region)
+
+#X$children[X$children == -1 ]  <- NA # -1 was a missing value code. will rCausalMGM handle missing values? they are dropped
+# not nned for this any longer. Fixed earlier
+
+X <-droplevels(X[X$economic_region !="Abroad",]) #no problem here but in Xtrain,Xtest we get Categorical: <5 samples in a category
+table(unlist(lapply(X,class)))
+# factor numeric 
+#     9       7 
+
+
+
+#set.seed(123)
+set.seed(124)
+train_idx = sample(1:nrow(X), 500000, replace = FALSE)
+test_idx = sample((1:nrow(X))[-train_idx], 500000, replace = FALSE)
+
+
+Xtrain=X[train_idx,]
+Xtrain <-droplevels(Xtrain[Xtrain$economic_region !="Abroad",]) #Categorical: <5 samples in a category
+sum(is.na(Xtrain)) #0
+
+Xtrain <- Xtrain[complete.cases(Xtrain),]
+Y <- Xtrain$log_wage
+W <- Xtrain$sex
+head(Xtrain$sex)
+#[1] male   male   male   female female male    Levels: female male
+W <- as.numeric(W) -1
+head(W) #[1] 1 1 1 0 0 1
+Xtrain <- Xtrain[,-c(1:2)]
+
+# in some grf functions 
+#male    (W = 1) is called "treated" 
+#female  (W = 0) is called "control"
+
+table(unlist(lapply(Xtrain,class)))
+# factor numeric 
+#      8       6 
+names(Xtrain)
+# [1] "age"             "race"            "hispanic_origin" "citizenship"     "nativity"        "marital"         "family_size"     "children"       
+# [9] "education_level" "english_level"   "economic_region" "weight"          "occupation"      "industry"       
+
+
+dim(Xtrain) #[1]  500000     13 # 14 with the weight variable
+class(Xtrain) #[1] "data.frame"
+
+weights_supplied <-Xtrain$weight
+weights_dummy <- rep(1,length(weights_supplied))
+Xtrain <- Xtrain %>% 
+  select(-weight) 
+    
+save(Xtrain ,W,Y, weights_supplied , weights_dummy , file=paste(wage_file_outputs, "Xtrain_500000_20.Rdata", sep=""))
+
+#save(Xtrain ,W,Y, file="./script9/Xtrain_500000_industry.Rdata")   not used  
+
+
+dim(Xtrain)
+#[1]  500000     13
+table(unlist(lapply(Xtrain, class)))
+# factor numeric 
+#      8       5 
+#
+#numeric age family_size children education_level english_level
+#factor  race  hispanic_origin citizenship nativity marital economic_region occupation industry
+res$xtrain <- list(dim = dim(Xtrain), n_factor = sum(sapply(Xtrain, is.factor)), n_numeric = sum(sapply(Xtrain, is.numeric)),
+                   levels = sapply(Xtrain[sapply(Xtrain, is.factor)], nlevels), train_idx = length(train_idx))
+step("Xtrain saved")
+
+```
+
+```{r tests_xtrain, echo=FALSE, eval=eval_flag, results='hide'}
+run_test("Xtrain: 500,000 rows, 13 covariates (8 factors, 5 numeric), no missing values", {
+  expect_equal(dim(Xtrain), c(500000, 13))
+  expect_equal(sum(sapply(Xtrain, is.factor)), 8)
+  expect_equal(sum(sapply(Xtrain, is.numeric)), 5)
+  expect_equal(sum(is.na(Xtrain)), 0)
+})
+run_test("Xtrain: occupation has 23 levels, industry 20 and economic_region 8 (the region Abroad is dropped)", {
+  expect_equal(nlevels(Xtrain$occupation), 23)
+  expect_equal(nlevels(Xtrain$industry), 20)
+  expect_equal(nlevels(Xtrain$economic_region), 8)
+  expect_false("Abroad" %in% levels(Xtrain$economic_region))
+})
+run_test("Xtrain: W is 0/1, Y is finite, the weights are positive and the lengths agree", {
+  expect_true(all(W %in% c(0, 1)))
+  expect_true(all(is.finite(Y)))
+  expect_true(all(weights_supplied > 0))
+  expect_equal(length(Y), nrow(Xtrain)); expect_equal(length(W), nrow(Xtrain)); expect_equal(length(weights_supplied), nrow(Xtrain))
+})
+run_test("Xtrain: the saved file reloads with the same objects", {
+  e <- new.env(); load(paste0(wage_file_outputs, "Xtrain_500000_20.Rdata"), e)
+  expect_setequal(ls(e), c("Xtrain", "W", "Y", "weights_supplied", "weights_dummy"))
+  expect_equal(dim(e$Xtrain), c(500000, 13))
+})
+```
+```{R, echo=FALSE, eval=FALSE}
+## table of variable types and number of levels
+## NOTE: X is created further down (chunk "set up Xtrain"); run this chunk after that one
+aa <- sapply(X, class)
+A<- data.frame(cbind(names(aa),aa, sapply(X, f<-function(x){(length(levels(x)))})))
+A <- A[,-1]
+names(A) <-c("type","levels")
+A$levels[ A$levels=="0"] <-NA
+
+x.big <-xtable(A ,  align="||l|l|l||",
+               label="table:variables",
+       caption="The variables in the pre-processed data.")
+print(x.big,tabular.environment='tabular',floating=TRUE,floating.environment='table')
+
+```
+
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{||l|l|l||}
+  \hline
+ & type & levels \\ 
+  \hline
+sex & factor & 2 \\ 
+  log\_wage & numeric &  \\ 
+  age & numeric &  \\ 
+  race & factor & 7 \\ 
+  hispanic\_origin & factor & 2 \\ 
+  citizenship & factor & 5 \\ 
+  nativity & factor & 2 \\ 
+  marital & factor & 5 \\ 
+  family\_size & numeric &  \\ 
+  children & numeric &  \\ 
+  education\_level & numeric &  \\ 
+  english\_level & numeric &  \\ 
+  economic\_region & factor & 8 \\ 
+  occupation & factor & 529 (23) \\ 
+  industry & factor &  269 (20) \\ 
+   \hline
+\end{tabular}
+\caption{The variables in the processed data. A mixture of continuous and discrete variables. "occupation" and "industry" may be 
+consolidated to 23 and 20 levels respectively.} 
+\label{table:variables}
+\end{table}
+
+
+```{R, echo=FALSE, eval=FALSE}
+# table of education levels 
+options(width=240)
+A <-table(data$education,data$education_level)
+# we will take education_level as a numeric variable -- roughly years of education
+# "Regular high school diploma" "GED or alternative credential" will be coded the same way
+
+B <- as.matrix(A[c(20,21,18,7,10,11,12,13,14,15,16,17,8,9, 2,23,6,24,1,3,4,19,22,5) ,])
+
+x.big <-xtable(B ,  align="||p{2cm}|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l||",
+               label="table:education_level",
+       caption="education level is taken as continuous, roughly years in schooling.")
+print(x.big,tabular.environment='tabular',floating=TRUE,floating.environment='sidewaystable')
+
+C<- diag(B)
+names(C) <- rownames(B)
+C<- data.frame(C)
+C<-cbind(C, 1:24)
+names(C)<- c("numbers", "years schooling")
+
+x.big <-xtable(C ,  align="||l|l|l||",
+               label="table:education_level",
+       caption="education level is taken as continuous, roughly years in schooling.")
+print(x.big,tabular.environment='tabular',floating=TRUE,floating.environment='table')
+
+```
+% latex table generated in R 4.3.1 by xtable 1.8-4 package
+% Wed Oct 21 16:05:26 2026
+\begin{table}[ht]
+\centering
+\begin{tabular}{||l|l|l||}
+  \hline
+ & numbers & years schooling \\ 
+  \hline
+No schooling completed & 8946 &   1 \\ 
+  Nursery school, preschool & 200 &   2 \\ 
+  Kindergarten & 152 &   3 \\ 
+  Grade 1 & 254 &   4 \\ 
+  Grade 2 & 473 &   5 \\ 
+  Grade 3 & 1061 &   6 \\ 
+  Grade 4 & 774 &   7 \\ 
+  Grade 5 & 1262 &   8 \\ 
+  Grade 6 & 5815 &   9 \\ 
+  Grade 7 & 1519 &  10 \\ 
+  Grade 8 & 4649 &  11 \\ 
+  Grade 9 & 7344 &  12 \\ 
+  Grade 10 & 8809 &  13 \\ 
+  Grade 11 & 12105 &  14 \\ 
+  12th grade - no diploma & 14931 &  15 \\ 
+  Regular high school diploma & 214885 &  16 \\ 
+  GED or alternative credential & 33541 &  17 \\ 
+  Some college, but less than 1 year & 72844 &  18 \\ 
+  1 or more years of college credit, no degree & 151365 &  19 \\ 
+  Associate's degree & 107830 &  20 \\ 
+  Bachelor's degree & 254930 &  21 \\ 
+  Master's degree & 113090 &  22 \\ 
+  Professional degree beyond a bachelor's degree & 25763 &  23 \\ 
+  Doctorate degree & 19221 &  24 \\ 
+   \hline
+\end{tabular}
+\caption{education level is taken as continuous, roughly years in schooling.} 
+\label{table:education_level}
+\end{table}
+ 
+
+
+\begin{longtable}{lp{10cm}}
+\caption{The 23 consolidated occupation codes.} \label{table:20industryCategories} \\
+\hline
+Code & Short Description \\
+\hline
+\endfirsthead
+\hline
+Code & Short Description \\
+\hline
+\endhead
+\hline
+\endfoot
+\hline
+\endlastfoot
+11 & Agriculture \& Forestry: Farming, animal production, forestry, fishing, and related support activities \\
+21 & Mining \& Extraction: All mining operations and resource extraction activities \\
+22 & Utilities: Power generation, water supply, and utility infrastructure \\
+23 & Construction: All construction and building activities \\
+31 & Manufacturing: All types of manufacturing operations, from food to machinery \\
+41 & Wholesale Trade: Distribution and wholesale of goods to businesses \\
+44 & Retail Trade: All retail stores and direct-to-consumer sales \\
+48 & Transportation \& Warehousing: All modes of transport and storage services \\
+51 & Information \& Media: Publishing, broadcasting, telecommunications, and digital media \\
+52 & Finance \& Insurance: Banking, insurance, and financial services \\
+53 & Real Estate \& Rental: Property management, real estate services, and equipment rental \\
+54 & Professional Services: Specialized business services like legal, accounting, and consulting \\
+55 & Corporate Management: Company management and enterprise operations \\
+56 & Administrative Services: Support services, employment services, and facility management \\
+61 & Education: All levels of educational institutions and support \\
+62 & Healthcare \& Social Services: Medical services, hospitals, and social assistance \\
+71 & Arts \& Entertainment: Performing arts, sports, and recreational activities \\
+72 & Accommodation \& Food Services: Hotels, restaurants, and food service operations \\
+81 & Other Services: Repair, maintenance, personal services, and religious organizations \\
+91 & Public Administration: Government operations, military, and public programs \\
+\end{longtable}
+\FloatBarrier
+
+```{R, echo=FALSE, eval=FALSE}
+# can remove this
+
+# checking the ordering of the factors for the reduced data
+# left over from when we were making a numeric version of Xtrain
+# Not making this any longer
+
+industry_means <- tapply(Y, Xtrain[["industry"]], mean)
+ordered_industry_levels <- names(sort(industry_means))
+head(ordered_industry_levels ) #Lowest wage (Accommodation & Food Services 72 ) will get code 1
+tail(ordered_industry_levels ) #Highest wage (Professional Services 54   ) will get  code 20
+
+# For occupation:
+occupation_means <- tapply(Y, Xtrain[["occupation"]], mean)
+ordered_occupation_levels <- names(sort(occupation_means))
+head(ordered_occupation_levels )
+tail(ordered_occupation_levels )
+# The ordering appears correct in the factor levels
+
+```
+
+```{R echo=FALSE, eval=FALSE}
+# we are not using the  Xtest -- the the code is here if we wanted to
+
+Xtest=X[test_idx,]
+Xtest <-droplevels(Xtest[Xtest$economic_region !="Abroad",]) #Categorical: <5 samples in a category
+sum(is.na(Xtest)) #0
+
+Xtest <- Xtest[complete.cases(Xtest),]
+Ytest <- Xtest$log_wage
+Wtest <- Xtest$sex
+head(Xtest$sex)
+#[1]  female female male   male   female male     Levels: female male
+Wtest <- as.numeric(Wtest) -1
+head(Wtest) #[1] 1 1 1 0 0 1
+Xtest <- Xtest[,-c(1:2)]
+
+table(unlist(lapply(Xtest,class)))
+# factor numeric 
+#      8       5 
+names(Xtest)
+# [1] "age"             "race"            "hispanic_origin" "citizenship"     "nativity"        "marital"         "family_size"     "children"       
+# [9] "education_level" "english_level"   "economic_region" "occupation"      "industry"       
+
+dim(Xtest) #[1]   500000     13
+class(Xtest) #[1] "data.frame"
+
+
+#save(Xtest ,Wtest,Ytest, file="./script9/Xtest.Rdata")  not used
+#save(Xtest ,Wtest,Ytest, file="./script9/Xtest_500000_industry.Rdata")  not used
+#save(Xtest ,Wtest,Ytest, file="./script9/Xtest_500000_20.Rdata")   not used but keep this in the file
+
+```
+
+
+#  set up Xtrain_ordered_numeric 
+
+- one-hot-encoding  may be a poor choice
+- explicitly emulate the effect of respect.unordered.factors="order"
+- with occupation have the full description and the 2018 SOC code (530 levels) and industry have the full description and the 2018 NAICS code (271 levels)
+- this code is the alternative code for setting up the data with 530 occupation levels and 271 industry levels
+- we ran into an issue here
+   
+   - the training and test data are being created from the original data frame X where these variables are factor
+   - For Xtrain we ordered factors by mean response and converted to numeric
+   - For Xtest we did the same process independently
+   - This means the ordering and thus numeric coding could be different between train and test
+
+- To fix this, we should, do the ordering and numeric conversion on the full dataset X first   Then split into train and test
+- however, not creating or using Xtest_ordered_numeric at the moment
+
+```{R xfull_setup, echo=FALSE, eval=eval_flag}
+step("setting up the full sample (529 occupation and 269 industry levels)")
+# this is for setting up the data with 530 occupation levels and 271 industry levels
+data$log_wage = log(data$salary / (data$weeks_worked * data$hours_worked))
+X  <- data[,c(
+    'sex',
+  'log_wage',
+  'age',
+  'race',
+  'hispanic_origin',
+  'citizenship',
+  'nativity', 
+  'marital',
+  'family_size',
+  'children',
+  'education_level',
+  'english_level',
+  'economic_region',
+  'occupation',
+  'industry',
+  'weight'
+)]
+
+X$occupation  <- as.factor(X$occupation) # occupation 530 levels 
+X$industry  <- as.factor(X$industry)
+
+# this is only used for one demonstration of a method in Supplementary_2. It is not used in the main argument, so can be droppled
+# save(X,  file=paste(wage_file_outputs, "X_1061763_15_industry_271_temp.Rdata", sep=""))
+
+```
+
+```{r order_levels, echo=FALSE, eval=eval_flag}
+# now we do it this way
+order_levels_by_mean_response <- function(df, Y, factor_col) {
+  # Calculate mean response for each level
+  mean_response <- tapply(Y, df[[factor_col]], mean)
+  
+  # Order levels by mean response
+  ordered_levels <- names(sort(mean_response))
+  
+  # Convert factor to ordered factor
+  df[[factor_col]] <- factor(df[[factor_col]], levels = ordered_levels)
+  
+  return(df)
+}
+
+X_ordered <- X
+for (col in c("race", "citizenship", "marital", "economic_region", "occupation" ,"industry")) {
+  X_ordered <- order_levels_by_mean_response(X_ordered , X_ordered$log_wage , col)
+}
+# reorder the labels by log_wage
+# table(as.numeric(X_ordered[["race"]]), X[["race"]])
+# these make more sensisble factors -- we could use them for something i.e. RF fitting with factors, however we
+# we convert the (ordered) factors to numeric 
+X_ordered_numeric <- X_ordered
+X_ordered_numeric[, c("race", "citizenship", "marital", "economic_region", "occupation" ,"industry")] <- lapply(X_ordered_numeric[, c("race", "citizenship", "marital", "economic_region", "occupation" ,"industry"),drop=FALSE], function(col) as.numeric(col))
+
+YY <- X_ordered$log_wage
+if (fig_eval_flag) {
+  dir.create("Supplementary_1_figs", showWarnings = FALSE)
+  png("Supplementary_1_figs/mean_wage_by_code.png", width = 2400, height = 1600, res = 300)
+  par(mfrow = c(2, 3), mar = c(4, 4, 3, 1))
+  for (v in c("race", "citizenship", "marital", "economic_region", "occupation", "industry"))
+    plot(tapply(YY, X_ordered_numeric[[v]], mean), xlab = "code", ylab = "mean log wage", main = v)   # citizenship and economic_region have a big jump
+  dev.off()
+}
+#all stricly increasing -- some of these big jumps could be investigated further
+
+```
+```{R, echo=FALSE, eval=FALSE}
+# just testing something
+
+length(which(X$occupation=="39-5011"))
+#[1] 313
+X[3008,]
+#        sex log_wage age  race hispanic_origin citizenship nativity       marital family_size children education_level english_level economic_region occupation industry
+#3008 female 2.035106  38 white              no           1   native never married           3        0              16             0       Southeast    39-5011   812111
+
+X_ordered_numeric[3008,]
+#        sex log_wage age race hispanic_origin citizenship nativity marital family_size children education_level english_level economic_region occupation industry
+#3008 female 2.035106  38    6              no           3   native       1           3        0              16             0               1         32        9
+
+length(which(X_ordered_numeric$occupation=="32"))
+#[1] 313
+
+
+# from Supp 4
+#sum(X_all$occupation=="32")
+##[1] 260
+#
+#X_all[which(row.names(X_all)=="3008"),]
+##     age race hispanic_origin citizenship nativity marital family_size children education_level english_level economic_region occupation industry
+##3008  38    6               0           3        1       1           3        0              16             0               1         32        9
+#sum(X_ordered_numeric_269.high$occupation=="32")
+#[1] 0
+#sum(X_ordered_numeric_269.mid$occupation=="32")
+##[1] 260
+#sum(X_ordered_numeric_269.low$occupation=="32")
+##[1] 0
+
+#compare_categorical_distribution <- function(var_name, low_data, mid_data, high_data,number=5) {
+#
+#number=5
+#var_name <- "occupation"
+#low_data<- X_ordered_numeric_269.low
+#
+#> low_freq
+#low_var
+# 166  437   51   66   35 
+#7053 5861 2954 2664 2600 
+#    35 is Food preparation workers
+
+```
+
+
+
+```{R recode_binary, echo=FALSE, eval=eval_flag}
+# checking the ordering of the factors for the full data
+
+table(unlist(lapply(X_ordered_numeric,class)))
+# factor numeric 
+#      3      12   #now 13 
+#$sex
+#$hispanic_origin
+#$nativity
+
+industry_means <- tapply(YY, X_ordered_numeric[["industry"]], mean)
+ordered_industry_levels <- names(sort(industry_means))
+head(ordered_industry_levels )  #Lowest wage  "811192"    industry_lookup["811192"]         "Car washes"  will get code 1
+tail(ordered_industry_levels )  #Highest wage  "51913"   industry_lookup["51913"]" Internet publishing and broadcasting and web search portals"  will get  code  "269"
+#i.e
+industry_means <- tapply(YY, X_ordered_numeric[["industry"]], mean)
+ordered_industry_levels <- names(sort(industry_means))
+head(ordered_industry_levels )
+#"1" "2" "3" "4" "5" "6"
+tail(ordered_industry_levels )
+
+# Check the first few rows to ensure the conversion
+head(X_ordered_numeric )
+#     sex log_wage age race hispanic_origin citizenship nativity marital family_size children education_level english_level economic_region occupation industry weight
+#1 female 2.610470  47    6              no           3   native       4           3        2              20             0               1        430       97     26
+#2   male 2.256648  70    6              no           3   native       5           2        0              18             0               1        156      122     16
+# (hispanic_origin and nativity are still factors at this point; they are recoded 0/1 below.)
+# Earlier versions of this file showed occupation 431 / 162 and industry 101 / 124 for these two rows.
+# Those codes were computed before the rows with children == -1 (a missing-value code) were dropped
+# (1,071,866 -> 1,061,763 rows). Dropping them changes the mean log wage of each level and so the ranks.
+# The numbers above are the current ones.
+#
+#Now, X_ordered_numeric will have the columns c("race", "citizenship", "marital", "economic_region", "occupation" ,"industry") ordered by their mean
+#response and converted to numeric.  You can then fit your model using the ranger
+#package: Fit the model using ranger with the ordered numeric factors
+#X_ordered_numeric<-na.omit(X_ordered_numeric)
+#sex, hispanic_origin and nativity are still factors. they are binary
+
+
+#Xtrain_ordered_numeric$sex <- as.numeric(Xtrain_ordered_numeric$sex)-1             # female 0 , male 1
+X_ordered_numeric$hispanic_origin <- as.numeric(X_ordered_numeric$hispanic_origin)-1 # no 0, yes 1
+X_ordered_numeric$nativity <- as.numeric(X_ordered_numeric$nativity)-1   # foreign-born  0, native 1
+
+```
+
+```{R save_full, echo=FALSE, eval=eval_flag}
+# testing some stuff and saving X_ordered_numeric,
+dim(X_ordered_numeric) #[1] 1061763      15
+names(X_ordered_numeric)
+# [1] "sex"             "log_wage"        "age"             "race"            "hispanic_origin" "citizenship"     "nativity"        "marital"        
+# [9] "family_size"     "children"        "education_level" "english_level"   "economic_region" "occupation"      "industry"       
+
+table(unlist(lapply(X_ordered_numeric,class)))
+# factor numeric # sex is factor
+#      1      14 
+X_ordered_numeric[1,]
+#    sex log_wage age race hispanic_origin citizenship nativity marital family_size children education_level english_level economic_region occupation industry
+#1 female  2.61047  47    6               0           3        1       4           3        2              20             0               1        430       97
+
+Y <- X_ordered_numeric$log_wage
+W <- X_ordered_numeric$sex
+head(W)
+#[1]  female male   male   female male   male  
+W <- as.numeric(W) -1
+head(W) #[1]  0 1 1 0 1 1
+X_ordered_numeric <- X_ordered_numeric[,-c(1:2)]
+dim(X_ordered_numeric ) #1061763      13
+
+
+dim(X_ordered_numeric) #[1]  500000     13
+class(X_ordered_numeric) #[1] "data.frame"
+
+weights_supplied <-X_ordered_numeric$weight
+weights_dummy <- rep(1,length(weights_supplied))
+X_ordered_numeric <- X_ordered_numeric %>% 
+  select(-weight) 
+    
+
+save(Y, W, X_ordered_numeric, weights_supplied, weights_dummy, file=paste(wage_file_outputs,"X_ordered_numeric_1061763_industry_269.Rdata",sep=""))
+#load(file=paste(wage_file_outputs,"X_ordered_numeric_1061763_industry_269.Rdata",sep=""))
+res$full <- list(dim = dim(X_ordered_numeric), n_men = sum(W), range = sapply(X_ordered_numeric, range))
+step("X_ordered_numeric saved")
+
+```
+
+```{r tests_full, echo=FALSE, eval=eval_flag, results='hide'}
+run_test("full sample: 1,061,763 rows and 13 numeric covariates, no missing values", {
+  expect_equal(dim(X_ordered_numeric), c(1061763, 13))
+  expect_true(all(sapply(X_ordered_numeric, is.numeric)))
+  expect_equal(sum(is.na(X_ordered_numeric)), 0)
+  expect_equal(names(X_ordered_numeric), c("age", "race", "hispanic_origin", "citizenship", "nativity", "marital", "family_size", "children",
+                                           "education_level", "english_level", "economic_region", "occupation", "industry"))
+})
+run_test("full sample: the codes of the ordered factors run from 1 to the number of levels (occupation 529, industry 269, region 9, race 7, marital 5, citizenship 5)", {
+  rg <- function(v) range(X_ordered_numeric[[v]])
+  expect_equal(rg("occupation"), c(1, 529)); expect_equal(rg("industry"), c(1, 269)); expect_equal(rg("economic_region"), c(1, 9))
+  expect_equal(rg("race"), c(1, 7)); expect_equal(rg("marital"), c(1, 5)); expect_equal(rg("citizenship"), c(1, 5))
+})
+run_test("full sample: the mean log wage increases with the code of each ordered factor (that is what the ordering means)", {
+  for (v in c("race", "citizenship", "marital", "economic_region", "occupation", "industry"))
+    expect_true(all(diff(tapply(Y, X_ordered_numeric[[v]], mean)) >= 0), info = v)
+})
+run_test("full sample: hispanic_origin and nativity are 0/1, W is 0/1 with 45 to 60 percent men, the weights are positive", {
+  expect_true(all(X_ordered_numeric$hispanic_origin %in% c(0, 1)))
+  expect_true(all(X_ordered_numeric$nativity %in% c(0, 1)))
+  expect_true(all(W %in% c(0, 1)))
+  expect_gt(mean(W), 0.45); expect_lt(mean(W), 0.60)
+  expect_true(all(weights_supplied > 0))
+  expect_equal(length(Y), nrow(X_ordered_numeric))
+})
+run_test("full sample: log wages are finite and the saved file reloads with the same objects", {
+  expect_true(all(is.finite(Y)))
+  e <- new.env(); load(paste0(wage_file_outputs, "X_ordered_numeric_1061763_industry_269.Rdata"), e)
+  expect_setequal(ls(e), c("Y", "W", "X_ordered_numeric", "weights_supplied", "weights_dummy"))
+  expect_equal(dim(e$X_ordered_numeric), c(1061763, 13))
+})
+```
+
+- not using this any longer  i.e. using X_ordered_numeric ) $1061763 \times 13$, but not selecting 
+Xtrain_ordered_numeric and Xtest_ordered_numeric form it.
+
+```{R, echo=FALSE, eval=FALSE}
+#not using this anymore
+# now select Xtrain Xtest
+Xtrain_ordered_numeric <- X_ordered_numeric[train_idx,]
+#Xtrain <-droplevels(Xtrain[Xtrain$economic_region !="Abroad",]) #Categorical: <5 samples in a category
+sum(is.na(Xtrain_ordered_numeric)) #42 no $children value
+Xtrain_ordered_numeric  <- Xtrain_ordered_numeric[complete.cases(Xtrain_ordered_numeric ),]
+Xtrain_ordered_numeric <- Xtrain_ordered_numeric[,-c(1:2)]
+
+table(unlist(lapply(Xtrain_ordered_numeric ,class)))
+# numeric 
+#     13 
+dim(Xtrain_ordered_numeric ) #3958   13
+
+Xtest_ordered_numeric <- X_ordered_numeric[test_idx,]
+#Xtest <-droplevels(Xtest[Xtest$economic_region !="Abroad",]) #Categorical: <5 samples in a category
+sum(is.na(Xtest_ordered_numeric)) #42 no $children value
+Xtest_ordered_numeric  <- Xtest_ordered_numeric[complete.cases(Xtest_ordered_numeric ),]
+Xtest_ordered_numeric <- Xtest_ordered_numeric[,-c(1:2)]
+
+table(unlist(lapply(Xtest_ordered_numeric ,class)))
+#numeric 
+#     13 
+dim(Xtest_ordered_numeric ) # 500000     11
+
+```
+
+
+# Variable Mapping Creation
+
+For 
+
+When we emulated `r respect.unordered.factors="order"`
+to make Xtrain_ordered_numeric
+we  have made new levels (or numeric codes) for all of the variables 
+`r c("race", "citizenship", "marital", "economic_region", "occupation" ,"industry") `
+This does not matter if we are not going to interpret their levels -- but we  will be doing that for some variables.   We need to make a map of numeric codes to variable level descriptors for all of these variables
+
+
+
+
+```{verbatim, echo=TRUE, eval=FALSE}
+Most common PUMS English proficiency coding:
+
+    0: "Not at all" (no English)
+    1: "Not well"
+    2: "Well"
+    3: "Very well"
+    4: "Speaks only English"
+```
+
+```{R mappings, echo=FALSE, eval=eval_flag}
+step("creating the mappings")
+# ============================================================
+# COMPLETE MAPPING CREATION FOR ALL CATEGORICAL VARIABLES
+# ============================================================
+
+library(dplyr)
+
+# ============================================================
+# PART 1: CREATE MAPPINGS
+# ============================================================
+
+create_mapping <- function(data_orig, X_factor, X_numeric, var_name, 
+                          code_col = NULL, desc_col = NULL) {
+  
+  # Create contingency table between factor and numeric versions
+  contingency <- table(
+    original = X_factor[[var_name]],
+    new = X_numeric[[var_name]]
+  )
+  
+  # Extract mapping: which original code maps to which new numeric code
+  mapping_df <- as.data.frame.table(contingency) %>%
+    filter(Freq > 0) %>%
+    select(original_code = original, new_code = new) %>%
+    mutate(
+      original_code = as.character(original_code),
+      new_code = as.numeric(as.character(new_code))
+    ) %>%
+    distinct()
+  
+  # Get the lookup from original data (if available)
+  if (!is.null(code_col) && !is.null(desc_col)) {
+    lookup <- data_orig %>%
+      select(all_of(c(code_col, desc_col))) %>%
+      rename(original_code = 1, description = 2) %>%
+      # the description of the occupations is a list column in the raw data (one string per element):
+      # make it a character vector, so that the mapping has plain character columns
+      mutate(original_code = as.character(original_code),
+             description = vapply(description, function(e) if (length(e) == 0) NA_character_ else as.character(e)[1],
+                                  character(1))) %>%
+      distinct()
+  } else {
+    # For variables without separate description columns
+    # Use factor levels as both code and description
+    lookup <- data.frame(
+      original_code = as.character(levels(X_factor[[var_name]])),
+      description = as.character(levels(X_factor[[var_name]])),
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Merge with descriptions
+  mapping_final <- mapping_df %>%
+    left_join(lookup, by = "original_code") %>%
+    arrange(new_code)
+  
+  return(mapping_final)
+}
+
+# Create all mappings
+cat("Creating mappings...\n")
+
+# Industry mapping (269 original codes -> aggregated codes)
+industry_mapping_full_description <- create_mapping(
+  data_orig = data,
+  X_factor = X,
+  X_numeric = X_ordered_numeric,
+  var_name = "industry",
+  code_col = "industry",
+  desc_col = "industry_description"
+)
+
+# Occupation mapping (530 original codes -> aggregated codes)
+occupation_mapping_full_description <- create_mapping(
+  data_orig = data,
+  X_factor = X,
+  X_numeric = X_ordered_numeric,
+  var_name = "occupation",
+  code_col = "occupation",
+  desc_col = "occupation_description"
+)
+
+# Race mapping
+race_mapping <- create_mapping(
+  data_orig = data,
+  X_factor = X,
+  X_numeric = X_ordered_numeric,
+  var_name = "race"
+)
+
+# Citizenship mapping
+citizenship_mapping <- create_mapping(
+  data_orig = data,
+  X_factor = X,
+  X_numeric = X_ordered_numeric,
+  var_name = "citizenship"
+)
+
+# Create citizenship descriptions lookup (since not in original data)
+citizenship_descriptions <- data.frame(
+  original_code = as.character(1:5),
+  description = c(
+    "Born in the U.S.",
+    "Born in Puerto Rico, Guam, U.S. Virgin Islands, or Northern Marianas",
+    "Born abroad of American parent(s)",
+    "U.S. citizen by naturalization",
+    "Not a U.S. citizen"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Update the citizenship mapping with proper descriptions
+citizenship_mapping <- citizenship_mapping %>%
+  select(original_code, new_code) %>%
+  left_join(citizenship_descriptions, by = "original_code") %>%
+  arrange(new_code)
+
+# Marital status mapping
+marital_mapping <- create_mapping(
+  data_orig = data,
+  X_factor = X,
+  X_numeric = X_ordered_numeric,
+  var_name = "marital"
+)
+
+# Economic region mapping
+economic_region_mapping <- create_mapping(
+  data_orig = data,
+  X_factor = X,
+  X_numeric = X_ordered_numeric,
+  var_name = "economic_region"
+)
+
+cat("All mappings created successfully!\n\n")
+
+# ============================================================
+# PART 2: UNIT TESTS FOR MAPPINGS
+# ============================================================
+
+cat(strrep("=", 60), "\n")
+cat("Running unit tests...\n")
+cat(strrep("=", 60), "\n")
+
+# Test 1: Check that all mappings have required columns
+test_mapping_structure <- function(mapping, name) {
+  cat("\nTest 1 -", name, "structure:\n")
+  
+  required_cols <- c("original_code", "new_code", "description")
+  has_cols <- all(required_cols %in% names(mapping))
+  
+  if (has_cols) {
+    cat("  OK Has all required columns\n")
+  } else {
+    cat("  X FAILED: Missing columns:", 
+        setdiff(required_cols, names(mapping)), "\n")
+  }
+  
+  return(has_cols)
+}
+
+# Test 2: Check for NA values
+test_mapping_nas <- function(mapping, name) {
+  cat("\nTest 2 -", name, "NA values:\n")
+  
+  na_counts <- colSums(is.na(mapping))
+  
+  if (all(na_counts == 0)) {
+    cat("  OK No NA values found\n")
+    result <- TRUE
+  } else {
+    cat("  ! WARNING: Found NA values:\n")
+    print(na_counts[na_counts > 0])
+    result <- FALSE
+  }
+  
+  return(result)
+}
+
+# Test 3: Check that new_codes are sequential starting from 1
+test_sequential_codes <- function(mapping, name) {
+  cat("\nTest 3 -", name, "sequential codes:\n")
+  
+  expected <- as.integer(1:max(mapping$new_code))
+  actual <- as.integer(sort(unique(mapping$new_code)))
+  
+  if (identical(expected, actual)) {
+    cat("  OK Sequential codes 1 to", max(mapping$new_code), "\n")
+    result <- TRUE
+  } else {
+    cat("  X FAILED: Non-sequential codes\n")
+    cat("    Expected: 1 to", max(mapping$new_code), "\n")
+    cat("    Missing:", setdiff(expected, actual), "\n")
+    cat("    Extra:", setdiff(actual, expected), "\n")
+    result <- FALSE
+  }
+  
+  return(result)
+}
+
+# Test 4: Check that wages increase with new_code
+test_wage_ordering <- function(X_numeric, Y, var_name, name) {
+  cat("\nTest 4 -", name, "wage ordering:\n")
+  
+  mean_wages <- tapply(Y, X_numeric[[var_name]], mean, na.rm = TRUE)
+  is_increasing <- all(diff(mean_wages) >= 0)
+  
+  if (is_increasing) {
+    cat("  OK Wages increase with new_code\n")
+  } else {
+    cat("  ! WARNING: Wages do not always increase with new_code\n")
+    decreases <- which(diff(mean_wages) < 0)
+    cat("    Decreases at positions:", decreases, "\n")
+  }
+  
+  return(is_increasing)
+}
+
+# Test 5: Check mapping coverage
+test_mapping_coverage <- function(X_factor, mapping, var_name, name) {
+  cat("\nTest 5 -", name, "coverage:\n")
+  
+  factor_levels <- levels(factor(X_factor[[var_name]]))   # citizenship is numeric in X, so take its levels from the values
+  mapping_codes <- mapping$original_code
+  
+  missing_in_mapping <- setdiff(factor_levels, mapping_codes)
+  extra_in_mapping <- setdiff(mapping_codes, factor_levels)
+  
+  if (length(missing_in_mapping) == 0 && length(extra_in_mapping) == 0) {
+    cat("  OK Perfect coverage\n")
+    result <- TRUE
+  } else {
+    if (length(missing_in_mapping) > 0) {
+      cat("  X Missing from mapping:", length(missing_in_mapping), "codes\n")
+    }
+    if (length(extra_in_mapping) > 0) {
+      cat("  X Extra in mapping:", length(extra_in_mapping), "codes\n")
+    }
+    result <- FALSE
+  }
+  
+  return(result)
+}
+
+# Test 6: Check uniqueness
+test_uniqueness <- function(mapping, name) {
+  cat("\nTest 6 -", name, "uniqueness:\n")
+  
+  dup_original <- sum(duplicated(mapping$original_code))
+  dup_new <- sum(duplicated(mapping$new_code))
+  
+  if (dup_original == 0 && dup_new == 0) {
+    cat("  OK No duplicate codes\n")
+    result <- TRUE
+  } else {
+    if (dup_original > 0) {
+      cat("  X FAILED:", dup_original, "duplicate original_codes\n")
+    }
+    if (dup_new > 0) {
+      cat("  X FAILED:", dup_new, "duplicate new_codes\n")
+    }
+    result <- FALSE
+  }
+  
+  return(result)
+}
+
+# Combined test function
+test_all <- function(mapping, X_factor, X_numeric, Y, var_name, name) {
+  cat("\n")
+  cat(strrep("=", 60), "\n")
+  cat("TESTING:", name, "\n")
+  cat(strrep("=", 60), "\n")
+  
+  results <- list(
+    structure = test_mapping_structure(mapping, name),
+    nas = test_mapping_nas(mapping, name),
+    sequential = test_sequential_codes(mapping, name),
+    wage_order = test_wage_ordering(X_numeric, Y, var_name, name),
+    coverage = test_mapping_coverage(X_factor, mapping, var_name, name),
+    uniqueness = test_uniqueness(mapping, name)
+  )
+  
+  all_pass <- all(unlist(results))
+  
+  cat("\n")
+  if (all_pass) {
+    cat("  *** ALL TESTS PASSED ***\n")
+  } else {
+    cat("  !!  SOME TESTS FAILED OR HAVE WARNINGS !! \n")
+  }
+  
+  return(results)
+}
+
+# Run tests on all mappings
+industry_tests <- test_all(
+  industry_mapping_full_description, X, X_ordered_numeric, Y, 
+  "industry", "INDUSTRY MAPPING"
+)#ALL TESTS PASSED
+
+occupation_tests <- test_all(
+  occupation_mapping_full_description, X, X_ordered_numeric, Y,
+  "occupation", "OCCUPATION MAPPING"
+)#ALL TESTS PASSED
+
+race_tests <- test_all(
+  race_mapping, X, X_ordered_numeric, Y,
+  "race", "RACE MAPPING"
+)#ALL TESTS PASSED
+
+citizenship_tests <- test_all(
+  citizenship_mapping, X, X_ordered_numeric, Y,
+  "citizenship", "CITIZENSHIP MAPPING"
+)# SOME TESTS FAILED OR HAVE WARNINGS
+# class(X$citizenship) is numeric
+
+marital_tests <- test_all(
+  marital_mapping, X, X_ordered_numeric, Y,
+  "marital", "MARITAL STATUS MAPPING"
+)#ALL TESTS PASSED
+
+economic_region_tests <- test_all(
+  economic_region_mapping, X, X_ordered_numeric, Y,
+  "economic_region", "ECONOMIC REGION MAPPING"
+)
+
+# ============================================================
+# PART 3: SUMMARY VISUALIZATIONS
+# ============================================================
+
+cat("\n\n")
+cat(strrep("=", 60), "\n")
+cat("SUMMARY VISUALIZATIONS\n")
+cat(strrep("=", 60), "\n\n")
+
+if (fig_eval_flag) {
+dir.create("Supplementary_1_figs", showWarnings = FALSE)
+png("Supplementary_1_figs/mapping_wage_by_code.png", width = 2000, height = 2400, res = 300)
+par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+
+# Plot mean wages by new code for each variable
+plot_wage_by_code <- function(X_numeric, Y, var_name, title) {
+  mean_wages <- tapply(Y, X_numeric[[var_name]], mean)
+  plot(mean_wages, 
+       xlab = "New Code", 
+       ylab = "Mean Log Wage",
+       main = title,
+       pch = 19,
+       col = "steelblue",
+       type = "b")
+  grid()
+}
+
+plot_wage_by_code(X_ordered_numeric, Y, "industry", "Industry")
+plot_wage_by_code(X_ordered_numeric, Y, "occupation", "Occupation")
+plot_wage_by_code(X_ordered_numeric, Y, "race", "Race")
+plot_wage_by_code(X_ordered_numeric, Y, "citizenship", "Citizenship")
+plot_wage_by_code(X_ordered_numeric, Y, "marital", "Marital Status")
+plot_wage_by_code(X_ordered_numeric, Y, "economic_region", "Economic Region")
+
+par(mfrow = c(1, 1))
+dev.off()
+}
+
+# ============================================================
+# PART 4: SAVE MAPPINGS
+# ============================================================
+
+cat("\n\nSaving mappings...\n")
+
+
+
+
+# Save individual mappings (for backwards compatibility)
+save(industry_mapping_full_description, 
+     file = paste0(wage_file_outputs, "industry_mapping_full_description.Rdata"))
+
+save(occupation_mapping_full_description, 
+     file = paste0(wage_file_outputs, "occupation_mapping_full_description.Rdata"))
+
+
+
+
+# Save all mappings together (MAIN OUTPUT FILE)
+save(
+  race_mapping,
+  citizenship_mapping,
+  marital_mapping,
+  economic_region_mapping,
+  industry_mapping_full_description,
+  occupation_mapping_full_description,
+  file = paste0( wage_file_outputs, "variable_mappings.Rdata")
+)
+cat("OK All mappings saved to", wage_file_outputs, "\n")
+
+# ============================================================
+# PART 5: SUMMARY STATISTICS
+# ============================================================
+
+cat("\n\n")
+cat(strrep("=", 60), "\n")
+cat("MAPPING SUMMARY\n")
+cat(strrep("=", 60), "\n\n")
+
+summary_table <- data.frame(
+  Variable = c("Industry", "Occupation", "Race", "Citizenship", 
+               "Marital", "Economic Region"),
+  Original_Codes = c(
+    length(unique(industry_mapping_full_description$original_code)),
+    length(unique(occupation_mapping_full_description$original_code)),
+    length(unique(race_mapping$original_code)),
+    length(unique(citizenship_mapping$original_code)),
+    length(unique(marital_mapping$original_code)),
+    length(unique(economic_region_mapping$original_code))
+  ),
+  New_Codes = c(
+    max(industry_mapping_full_description$new_code),
+    max(occupation_mapping_full_description$new_code),
+    max(race_mapping$new_code),
+    max(citizenship_mapping$new_code),
+    max(marital_mapping$new_code),
+    max(economic_region_mapping$new_code)
+  )
+)
+
+print(summary_table)
+
+cat("\nOK Mapping creation and testing complete!\n")
+
+# Print file locations
+cat("\nOutput files created:\n")
+cat("- Individual mappings:", paste0(wage_file_outputs, "industry_mapping_full_description.Rdata"), "\n")
+cat("- Individual mappings:", paste0(wage_file_outputs,  "occupation_mapping_full_description.Rdata"), "\n")
+cat("- Combined mappings:", paste0(wage_file_outputs,  "variable_mappings.Rdata"), "\n")
+res$mappings <- summary_table
+
+```
+
+```{r tests_mappings, echo=FALSE, eval=eval_flag, results='hide'}
+mapping_tests <- list(industry = industry_tests, occupation = occupation_tests, race = race_tests,
+                      citizenship = citizenship_tests, marital = marital_tests, economic_region = economic_region_tests)
+for (nm in names(mapping_tests))
+  run_test(paste0("mapping of ", nm, ": structure, no NA, sequential codes, wages increase with the code, coverage, unique codes"), {
+    failed <- names(mapping_tests[[nm]])[!unlist(mapping_tests[[nm]])]
+    expect_equal(length(failed), 0, info = paste("failed:", paste(failed, collapse = ", ")))
+  })
+run_test("mapping: 529 occupation codes, 269 industry codes, 7 races, 5 citizenship values, 5 marital statuses, 9 regions", {
+  expect_equal(summary_table$New_Codes, c(269, 529, 7, 5, 5, 9))
+  expect_equal(summary_table$Original_Codes, c(269, 529, 7, 5, 5, 9))
+})
+run_test("mapping: the descriptions of occupation and industry are character vectors (not list columns)", {
+  expect_true(is.character(occupation_mapping_full_description$description))
+  expect_true(is.character(industry_mapping_full_description$description))
+  expect_true(is.character(citizenship_mapping$description))
+})
+run_test("mapping: the saved mapping file reloads with the six mappings", {
+  e <- new.env(); load(paste0(wage_file_outputs, "variable_mappings.Rdata"), e)
+  expect_setequal(ls(e), c("race_mapping", "citizenship_mapping", "marital_mapping", "economic_region_mapping",
+                           "industry_mapping_full_description", "occupation_mapping_full_description"))
+})
+```
+
+## testing  (for verification only)
+
+```{R, echo=FALSE, eval=FALSE}
+# This section contains verification code that was used during development
+# It is included for reference but should not be run in production
+
+# Testing specific occupation codes
+length(which(X$occupation=="39-5011"))
+# X[3008,]
+# X_ordered_numeric[3008,]
+# length(which(X_ordered_numeric$occupation=="32"))
+
+# Checking table structure
+table(unlist(lapply(X_ordered_numeric, class)))
+# Should show: factor 3, numeric 12 (for sex, hispanic_origin, nativity as factors)
+
+# Verifying wage ordering for different variables
+industry_means <- tapply(Y, X_ordered_numeric$industry, mean)
+occupation_means <- tapply(Y, X_ordered_numeric$occupation, mean)
+# These should be strictly increasing
+
+```
+
+```{r tests_summary, echo=FALSE, eval=eval_flag, include=FALSE}
+# Results of all the tests, written to test_log; the results and the session information are written next to it.
+save(res, file = results_file)
+test_results$detail <- gsub("\\s+", " ", test_results$detail)
+print(test_results[, c("result", "test")], right = FALSE)
+cat(sum(test_results$result == "PASS"), "of", nrow(test_results), "tests passed\n")
+write.table(test_results, test_log, sep = "\t", row.names = FALSE, quote = FALSE)
+writeLines(capture.output(sessionInfo()), "Supplementary_1_session.txt")
+
+```
+
+# References

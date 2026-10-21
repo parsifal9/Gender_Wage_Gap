@@ -1,0 +1,132 @@
+---
+title: "PUMS Data Description"
+author: "Rob Dunne"
+date: "October 2026"
+output:
+    bookdown::pdf_document2:
+     geometry: a4paper
+     toc: true
+     toc_depth: 3
+     fig_caption: yes
+     citation_package: biblatex
+     biblio-style: "apalike"
+     biblatexoptions: [backend=biber, maxbibnames=999]
+bibliography:
+    - wageinequality.bib
+header-includes:
+   - |
+     \usepackage{dcolumn}
+     \usepackage{placeins}
+     \usepackage{float}
+     \usepackage{ltablex}
+     \usepackage{array}
+     \usepackage{caption}
+     \usepackage{booktabs}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Source
+
+Wage data from the 2018 American Community Survey (ACS) 1-Year PUMS (Public Use Microdata Sample), published by the US Census Bureau. The survey covers approximately 3.5 million people annually across 51 states and the District of Columbia. The 2018 dataset contains 3,214,539 anonymised records.
+
+The analysis was inspired by @nafStudyingGenderWage2023. The data can be loaded directly from GitHub:
+
+```r
+load(url("https://raw.githubusercontent.com/lorismichel/drf/master/applications/wage_data/data/datasets/wage_data.Rdata"))
+```
+
+or from the local copy:
+
+```r
+wage_data_dir <- "<directory containing wage_data.Rdata>"
+load(paste0(wage_data_dir, "wage_data.Rdata"))
+```
+
+# Filtering
+
+The following filters are applied to the raw 3.2M records to obtain the analysis dataset:
+
+- Age $\geq 17$
+- Weeks worked $> 48$ (full-year employment)
+- Hours worked $> 16$ per week on average
+- Employment status = employed (self-employed excluded — self-employed persons often report zero annual salary)
+- `children == -1` recoded to NA and dropped (see Section \@ref(sec:peculiarities))
+
+**Final dataset: 1,061,763 records, 25 variables.**
+
+The training sample used in the GRF analyses is 500,000 records drawn without replacement using `set.seed(124)`.
+
+# Outcome and Treatment Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `log_wage` | numeric | $\log(\text{salary} / (\text{weeks\_worked} \times \text{hours\_worked}))$ — log hourly wage. Salary is strongly right-skewed so the log transform is used. Scaling by time worked matters because men work on average 11\% more hours than women. |
+| `sex` | factor (2 levels) | `female` = 0 (control), `male` = 1 (treated) in GRF terminology |
+
+# Covariates in the Analysis Dataset (Xtrain, 13 variables)
+
+## Numeric variables
+
+| Variable | Scale | Description |
+|----------|-------|-------------|
+| `age` | years | Full data: $\geq 17$. The age-truncated analysis restricts to ages 25--54. |
+| `family_size` | integer $\geq 1$ | Number of family members in the same household |
+| `children` | integer $\geq 0$ | Own **dependent** children currently living in the same household (not total children ever born). See Section \@ref(sec:peculiarities). |
+| `education_level` | 1--24 | Mapped from 24 categorical PUMS education levels to a continuous approximation of years of schooling. Key values: 1 = no schooling, 16 = high school diploma, 17 = GED, 20 = Associate's degree, 21 = Bachelor's degree, 22 = Master's degree, 23 = Professional degree, 24 = Doctorate. |
+| `english_level` | 0--4 | English proficiency: 0 = "Not at all", 1 = "Not well", 2 = "Well", 3 = "Very well", 4 = "Speaks only English" |
+
+## Factor variables
+
+| Variable | Levels | Description |
+|----------|--------|-------------|
+| `race` | 7 | white, black, asian, AIAN (American Indian / Alaska Native), NHOPI (Native Hawaiian / Other Pacific Islander), mix, other |
+| `hispanic_origin` | 2 | no / yes; coded 0/1 in the ordered-numeric version of the data |
+| `citizenship` | 5 | 1 = Born in the US; 2 = Born in Puerto Rico, Guam, US Virgin Islands, or Northern Marianas; 3 = Born abroad of American parent(s); 4 = US citizen by naturalisation; 5 = Not a US citizen. Stored as numeric (1--5) in the raw data but treated as ordered factor. |
+| `nativity` | 2 | native / foreign-born; coded 1/0 in the ordered-numeric version |
+| `marital` | 5 | married, never married, divorced, separated, widowed |
+| `economic_region` | 9 (→ 8 used) | Nine BEA (Bureau of Economic Analysis) economic regions plus "Abroad". The "Abroad" category is dropped from the training data as it produces fewer than 5 samples in a GRF node. |
+| `occupation` | 529 → 23 | Full SOC (Standard Occupational Classification) code with 529 levels, reduced to 23 categories by taking the first two digits of the SOC code. |
+| `industry` | 269 → 20 | Full NAICS code with 269 levels, reduced to 20 categories by NAICS sector grouping. Consolidations: 32/33/3M → 31; 42 → 41; 45/4M → 44; 49 → 48; 92 → 91. |
+
+# Variables in the Raw Data Not Carried into Xtrain
+
+The following variables are present in the raw PUMS data or are computed during preprocessing but are not included as covariates in the GRF training data:
+
+| Variable | Description |
+|----------|-------------|
+| `salary` | Annual salary earnings (used to compute `log_wage`) |
+| `weeks_worked` | Weeks worked per year (used to compute `log_wage`; filter: $> 48$) |
+| `hours_worked` | Average hours worked per week (used to compute `log_wage`; filter: $> 16$) |
+| `employment_status` | employed / not employed (filter: employed only) |
+| `employer` | government, non-profit, for-profit, self-employed (filter: self-employed excluded) |
+| `state` | State or territory of residence (59 levels; summarised by `economic_region`) |
+| `place_of_work` | Geographical unit of workplace (59 levels; summarised by `economic_region`) |
+| `education` | Original PUMS education text variable (24 levels; replaced by `education_level`) |
+| `occupation_description` | Full occupation text description (list column) |
+| `industry_description` | Full industry text description (list column) |
+| `weight` | US Census Bureau statistical sampling weight, intended to correct for sampling bias. Kept separately as `weights_supplied` for use in weighted GRF analyses. |
+
+# Peculiarities {#sec:peculiarities}
+
+## The `children` variable
+
+The `children` variable counts **own dependent children currently living in the same household**. It does not record the total number of children ever born to the respondent. A person with adult children who have left home, or whose children live with another parent, will have `children = 0`.
+
+The value $-1$ was used in the raw data as a missing value code. There were 10,103 such records. These were recoded to `NA` and removed with `na.omit()`, reducing the dataset from 1,071,866 to 1,061,763 records.
+
+## Empty factor level in `industry`
+
+After filtering, the empty string `""` remained as an unused factor level in `industry`. No data rows had `industry == ""` but the level existed. It was removed with `droplevels()`.
+
+## Occupation code 999920
+
+The crosswalk file `2018-occupation-code-list-and-crosswalk.xlsx` contains occupation code 999920 which does not appear in the actual PUMS data. It is removed by `droplevels()`. Military occupations (e.g. 55-9830, "Military, rank not specified") are present in the PUMS data but not in the crosswalk file; occupation descriptions are therefore taken directly from the PUMS data rather than the crosswalk.
+
+## Ordered-numeric encoding
+
+For methods that require numeric inputs, categorical variables (`race`, `citizenship`, `marital`, `economic_region`, `occupation`, `industry`) are converted to integer codes by ordering their levels by mean log wage (ascending). This means higher numeric codes correspond to higher-paying groups. The mapping from original codes to new numeric codes is saved in `processing_files/variable_mappings.Rdata`.
+
+# References

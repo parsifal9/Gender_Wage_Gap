@@ -1,0 +1,436 @@
+---
+title: |
+    | Generalized Random Forest
+    | Handling categorical variables
+author: "Rob Dunne"
+date: "Saturday, October 17, 2026"
+output:
+    bookdown::pdf_document2:
+     toc: true
+     toc_depth: 3
+     fig_caption: yes
+     citation_package: biblatex
+     biblio-style: apa
+     biblatexoptions: [backend=biber, maxbibnames=999]
+bibliography:
+    - wageinequality.bib
+header-includes:
+    - |
+    - \usepackage{dcolumn}
+    - \usepackage{placeins}
+    - \usepackage{float}
+    - \usepackage{caption}
+    - \usepackage{threeparttable}
+    - \usepackage{csquotes}
+---
+
+<!--
+PURPOSE: documents how the categorical variables (occupation 529 levels, industry 269 levels, and four smaller ones) are coded for the forests,
+  and why. It is a side discussion to the argument of Supplementary 1 to 5, which use the result (levels ordered by mean log wage, coded 1 to k).
+  The first version (December 2024, in the git history) was a set of notes that were stepped through by hand and
+  never run as a script. This version is a script. The simulation follows a Win-Vector `ranger` example ("Ranger Example", Win-Vector LLC; the original is
+  ~/Dropbox/learning/machine-learning/random_forests/script12.Rmd and is not part of this project).
+
+INPUT FILES:
+  processing_files/X_ordered_numeric_1061763_industry_269.Rdata   made by Supplementary_1 (only needed for the real-data comparison)
+  wageinequality.bib
+
+OUTPUT FILES:
+  handling_categorical_variables_results.Rdata   the list res
+  handling_categorical_variables_tests.txt, handling_categorical_variables_session.txt
+
+FLAGS (set in the setup chunk):
+  eval_flag      TRUE runs the simulation and the real-data comparison (about 10 to 20 minutes on 12 cores).
+                 FALSE knits the text and tables from handling_categorical_variables_results.Rdata.
+  n_rep_sim, n_rep_real, n_train_real, n_test_real, n_trees   sizes of the experiments.
+
+UNIT TESTS: chunks named tests_* call run_test("description", { testthat::expect_...() }); the last chunk writes the test file.
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=4, dpi=300, echo = FALSE)
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "")
+
+eval_flag <- TRUE
+
+# sizes of the experiments
+n_rep_sim    <- 20      # replications of each simulation setting
+n_train_sim  <- 500
+n_test_sim   <- 2000
+n_rep_real   <- 3       # random subsamples of the wage data
+n_train_real <- 30000
+n_test_real  <- 15000
+n_trees      <- 200
+
+knitr::opts_chunk$set(eval = eval_flag, results = 'hide', fig.show = 'hide', warning = FALSE, message = FALSE)
+
+test_log <- "handling_categorical_variables_tests.txt"
+results_file <- "handling_categorical_variables_results.Rdata"
+test_results <- data.frame(test = character(), result = character(), detail = character(), stringsAsFactors = FALSE)
+run_test <- function(description, code) {
+  detail <- tryCatch({ force(code); "" }, error = function(e) conditionMessage(e))
+  result <- if (identical(detail, "")) "PASS" else "FAIL"
+  test_results[nrow(test_results) + 1, ] <<- c(description, result, detail)
+  cat(sprintf("[%s] %s\n", result, description))
+  if (result == "FAIL") cat("       ", detail, "\n")
+  invisible(result == "PASS")
+}
+
+```
+
+```{r libraries, echo=FALSE, eval=TRUE, include=FALSE}
+options(width=160)
+library(ranger)
+library(vtreat)
+library(dplyr)
+library(testthat)
+library(knitr)
+library(kableExtra)
+
+f <- function(x, d = 3) formatC(x, format = "f", digits = d, big.mark = ",")
+pct <- function(x, d = 1) formatC(100 * x, format = "f", digits = d)
+if (!eval_flag) load(results_file)
+
+```
+
+```{r paths}
+# PATHS (must be set): run this file from the project directory. wage_file_outputs is where the intermediate .Rdata files are
+# read from and written to; change it here if they are somewhere else.
+wage_file_outputs <- "./processing_files/"
+res <- list()
+
+```
+
+# The problem
+
+Some of the covariates in the wage data are categorical with no natural order: `occupation` (529 levels in the full data), `industry` (269), and the smaller `race`,
+`citizenship`, `marital` and `economic_region`. (`education_level` is years of schooling and is treated as a number.)
+Generalized random forests (`grf`) take only numeric covariates, so every categorical variable has to be turned into numbers before `causal_forest` is called.
+The choice matters, for the following reasons.
+
+- Coding the levels $1, 2, \dots, k$ in an arbitrary order makes the forest split on "level $\le c$", which groups together levels that have nothing in common.
+- One-hot coding gives $k$ columns. A split can then separate one level from all the others, so it takes many splits to separate two groups of levels. For 529 occupations that is a lot of columns, most of them nearly always 0.
+- Other textbook codings (Helmert, frequency, binary, hashing) also impose an order that is unrelated to the response, so they have the same problem as an arbitrary order.
+
+The rest of this file shows, on a small simulation and on the wage data, what the alternatives cost, and explains the choice made in Supplementary 1: **order the levels of each categorical
+variable by their mean log wage and use the rank as a number.**
+
+# The default in `ranger` is poor
+
+A factor in `ranger` is, by default, treated as ordered in the order of its levels (`respect.unordered.factors = "ignore"`: the splits are on
+`as.numeric(factor) <= c`). The levels of a factor are in alphabetical order, so the result depends on how the levels happen to be labelled. This is a surprise to most users, and
+the documentation says so only in the description of the argument. (The documentation of `ranger` says that the default is `"partition"` for the `extratrees` split rule and `"ignore"` for the others.)
+
+## A simulation
+
+The simulation follows the Win-Vector `ranger` example (see the header of this file). There are four categorical variables `x1` to `x4`, each with $k$ levels labelled `lev_001`, `lev_002`, ... The response is the sum of four scores,
+one for each variable, plus noise with standard deviation 1. In the *alternating* setting the score of a level is $+1$ for an odd level number and $-1$ for an even one, so adjacent levels in the alphabetical order have
+opposite effects: the worst case for the default. In the *random* setting each level has an effect drawn from $N(0,1)$, so the labels are unrelated to the effects. The test mean squared error cannot be smaller than the
+noise variance, which is 1.
+
+The methods compared are:
+
+- **default**: `ranger` with the factor, `respect.unordered.factors = "ignore"` (the default);
+- **order**: `respect.unordered.factors = "order"`: the levels are ordered by their mean response in the training data before the trees are grown, and treated as ordered;
+- **partition**: `respect.unordered.factors = "partition"`: every way of dividing the levels in two is tried (only for $k \le 10$, since the number of partitions is $2^{k-1}-1$);
+- **one-hot**: $4k$ indicator columns;
+- **vtreat**: the cross-fitted impact codes (`catN`) of the `vtreat` package, described below.
+
+```{r simulation}
+make_sim <- function(n_train, n_test, k, type) {
+  n <- n_train + n_test
+  labs <- paste0("lev_", formatC(seq_len(k), width = 3, flag = "0"))
+  eff <- if (type == "alternating") matrix(2 * (seq_len(k) %% 2) - 1, k, 4) else matrix(rnorm(4 * k), k, 4)
+  d <- as.data.frame(lapply(1:4, function(j) sample.int(k, n, replace = TRUE)))
+  names(d) <- paste0("x", 1:4)
+  y <- rowSums(sapply(1:4, function(j) eff[d[[j]], j])) + rnorm(n)
+  for (j in 1:4) d[[j]] <- factor(labs[d[[j]]], levels = labs)
+  list(x = d, y = y, train = seq_len(n_train), test = n_train + seq_len(n_test))
+}
+
+fit_all <- function(x, y, train, test, k, trees = n_trees, partition = k <= 10) {
+  mse <- function(p) mean((p - y[test])^2)
+  d <- cbind(x, y = y)
+  out <- c()
+  m <- ranger(y ~ ., data = d[train, ], num.trees = trees)
+  out["default"] <- mse(predict(m, d[test, ])$predictions)
+  m <- ranger(y ~ ., data = d[train, ], num.trees = trees, respect.unordered.factors = "order")
+  out["order"] <- mse(predict(m, d[test, ])$predictions)
+  out["partition"] <- NA
+  if (partition) {
+    m <- ranger(y ~ ., data = d[train, ], num.trees = trees, respect.unordered.factors = "partition")
+    out["partition"] <- mse(predict(m, d[test, ])$predictions)
+  }
+  oh <- as.data.frame(model.matrix(~ . - 1, data = x))
+  m <- ranger(x = oh[train, ], y = y[train], num.trees = trees)
+  out["one-hot"] <- mse(predict(m, oh[test, ])$predictions)
+  cfe <- vtreat::mkCrossFrameNExperiment(d[train, ], names(x), "y", verbose = FALSE)
+  keep <- cfe$treatments$scoreFrame$varName[cfe$treatments$scoreFrame$code == "catN"]
+  ztrain <- cfe$crossFrame[, c(keep, "y")]
+  ztest <- vtreat::prepare(cfe$treatments, d[test, ], varRestriction = keep)
+  m <- ranger(y ~ ., data = ztrain, num.trees = trees)
+  out["vtreat"] <- mse(predict(m, ztest)$predictions)
+  out
+}
+
+set.seed(2026)
+settings <- expand.grid(type = c("alternating", "random"), k = c(5, 20, 100), stringsAsFactors = FALSE)
+sim_runs <- lapply(seq_len(nrow(settings)), function(i) {
+  t(sapply(seq_len(n_rep_sim), function(r) {
+    s <- make_sim(n_train_sim, n_test_sim, settings$k[i], settings$type[i])
+    fit_all(s$x, s$y, s$train, s$test, settings$k[i])
+  }))
+})
+res$sim_settings <- settings
+res$sim_mean <- t(sapply(sim_runs, colMeans))
+res$sim_se   <- t(sapply(sim_runs, function(m) apply(m, 2, sd) / sqrt(nrow(m))))
+
+```
+
+```{r relabel}
+# The default depends on the labels: the same data, with the levels of each factor put in random orders
+set.seed(7)
+s <- make_sim(n_train_sim, n_test_sim, 20, "alternating")
+relabel <- replicate(30, {
+  x <- s$x
+  for (j in 1:4) x[[j]] <- factor(as.character(x[[j]]), levels = sample(levels(x[[j]])))
+  d <- cbind(x, y = s$y)
+  m <- ranger(y ~ ., data = d[s$train, ], num.trees = n_trees)
+  mean((predict(m, d[s$test, ])$predictions - s$y[s$test])^2)
+})
+m <- ranger(y ~ ., data = cbind(s$x, y = s$y)[s$train, ], num.trees = n_trees, respect.unordered.factors = "order")
+res$relabel <- c(min = min(relabel), median = median(relabel), max = max(relabel),
+                 order = mean((predict(m, cbind(s$x, y = s$y)[s$test, ])$predictions - s$y[s$test])^2))
+
+```
+
+```{r tests_simulation, echo=FALSE, eval=eval_flag, include=FALSE}
+run_test("simulation: every method gives a finite test error that is not below the noise variance (allowing for sampling error)", {
+  m <- res$sim_mean[, c("default", "order", "one-hot", "vtreat")]
+  expect_true(all(is.finite(m)))
+  expect_true(all(m > 0.95))
+})
+run_test("simulation: partition was run only for k <= 10", {
+  expect_equal(is.na(res$sim_mean[, "partition"]), res$sim_settings$k > 10)
+})
+run_test("simulation: relabelling the levels changes the default but there are 30 distinct labellings", {
+  expect_gt(res$relabel["max"], res$relabel["min"])
+})
+
+```
+
+```{r table_sim, echo=FALSE, eval=TRUE, results='asis'}
+cell <- function(m, s) ifelse(is.na(m), "--", sprintf("%.2f (%.2f)", m, s))
+tab <- data.frame(Setting = paste0(ifelse(res$sim_settings$type == "alternating", "Alternating", "Random"), ", $k = ", res$sim_settings$k, "$"),
+                  Default = cell(res$sim_mean[, "default"], res$sim_se[, "default"]),
+                  Order = cell(res$sim_mean[, "order"], res$sim_se[, "order"]),
+                  Partition = cell(res$sim_mean[, "partition"], res$sim_se[, "partition"]),
+                  `One-hot` = cell(res$sim_mean[, "one-hot"], res$sim_se[, "one-hot"]),
+                  vtreat = cell(res$sim_mean[, "vtreat"], res$sim_se[, "vtreat"]), check.names = FALSE)
+kbl(tab, format = "latex", booktabs = TRUE, escape = FALSE, row.names = FALSE,
+    caption = "Test mean squared error (standard error of the mean over replications) in the simulation. The smallest possible value is 1, the variance of the noise.",
+    label = "simtable") %>% kable_styling(latex_options = "HOLD_position")
+
+```
+
+Table \@ref(tab:simtable) gives the test error. In the alternating setting the default is far from the best possible value: its error is `r f(res$sim_mean[res$sim_settings$type == "alternating" & res$sim_settings$k == 20, "default"], 2)` for $k = 20$,
+against `r f(res$sim_mean[res$sim_settings$type == "alternating" & res$sim_settings$k == 20, "order"], 2)` for `order`. When one dataset is relabelled at random 30 times, the default's error runs from `r f(res$relabel["min"], 2)` to `r f(res$relabel["max"], 2)`
+while `order` gives `r f(res$relabel["order"], 2)` whatever the labelling. The default is therefore a lottery that depends on the labels.
+
+# Ordering the levels by the mean response
+
+For a regression forest, the best binary split of a node on a categorical variable with $k$ levels is the division of the levels into two groups that minimises the sum of squared errors. There are $2^{k-1}-1$ divisions.
+The result of @fisher1958grouping, used in CART [@breiman1984classification], is that after sorting the levels by their mean response *in the node*, the best division is one of the $k-1$ cut points of the sorted list. So sorting
+and then splitting as if the variable were numeric loses nothing, and is cheap.
+
+Two points need care.
+
+1. The ordering that is optimal is the one in the node being split. The `ranger` option `respect.unordered.factors = "order"` sorts the levels *once*, by the mean response in the training data, before the forest is grown (this
+   can be seen in the R code of `ranger`, which re-codes the factors before it calls the C++ code), and the trees then use that one order at every node. That is an approximation. The paper of @wrightSplittingCategoricalPredictors2019 compares the options and finds
+   the ordering approach to be as good as the exhaustive partition in the cases they consider, and much faster. The simulation agrees (columns Order and Partition of Table \@ref(tab:simtable)).
+2. The ordering uses the response, so it must be computed without the rows on which the model is judged. This is the subject of the section on leakage below.
+
+The pipeline of this project does the same thing as `order`: in Supplementary 1 each categorical variable is recoded $1, \dots, k$ in increasing order of its mean log wage, and the forests are fitted to the codes as numbers. Doing it in advance is not
+a different method, but it is needed for `grf`, which has no such option.
+
+# The wage data
+
+The comparison is repeated on the wage data (people aged 26 to 53), predicting the log wage from the 13 covariates. In each of `r n_rep_real` random subsamples, `r f(n_train_real, 0)` people are used to fit the forest and another `r f(n_test_real, 0)` to judge it.
+The six categorical variables are given arbitrary labels (a random permutation of the codes). The methods are:
+
+- **default**: `ranger` on the factors, `respect.unordered.factors = "ignore"`, with the arbitrary labels;
+- **order (ranger)**: `respect.unordered.factors = "order"`;
+- **order (train)**: codes $1, \dots, k$ in the order of the mean log wage in the training rows, used as numbers (the pipeline's method, done without the test rows);
+- **order (leaky)**: the same, with the means computed from the training and test rows together;
+- **order (Supp. 1)**: the codes as supplied by Supplementary 1, in the order of the mean over all 1,061,763 people;
+- **one-hot**: indicator columns for all levels of the six variables;
+- **vtreat**: the cross-fitted impact codes of the six variables.
+
+```{r realdata}
+load(paste(wage_file_outputs, "X_ordered_numeric_1061763_industry_269.Rdata", sep = ""))   # X_ordered_numeric, Y, W, weights_supplied, weights_dummy
+keep <- (X_ordered_numeric$age > 25) & (X_ordered_numeric$age < 54)
+Xall <- X_ordered_numeric[keep, ]
+yall <- Y[keep]
+rm(X_ordered_numeric, Y, W, weights_supplied, weights_dummy)
+cats <- c("race", "citizenship", "marital", "economic_region", "occupation", "industry")
+res$n_age <- nrow(Xall)
+res$n_levels <- sapply(Xall[cats], function(v) length(unique(v)))
+# the sizes of the levels of occupation and industry in the whole age-restricted sample
+res$level_size <- sapply(Xall[c("occupation", "industry")], function(v) quantile(table(v), c(0, 0.1, 0.5)))
+
+# ranks of the levels in the order of the mean of y over the rows `rows`; levels without a row get the overall mean
+order_codes <- function(code, y, rows, all_codes) {
+  m <- tapply(y[rows], factor(code[rows], levels = all_codes), mean)
+  m[is.na(m)] <- mean(y[rows])
+  rank(m, ties.method = "first")[match(code, all_codes)]
+}
+
+mse_real <- function(pred, y) mean((pred - y)^2)
+
+real_once <- function(seed) {
+  set.seed(seed)
+  idx <- sample(nrow(Xall), n_train_real + n_test_real)
+  tr <- idx[seq_len(n_train_real)]
+  te <- idx[n_train_real + seq_len(n_test_real)]
+  rows <- c(tr, te)
+  X <- Xall[rows, ]; y <- yall[rows]
+  itr <- seq_len(n_train_real); ite <- n_train_real + seq_len(n_test_real)
+  num <- setdiff(names(X), cats)
+  out <- c()
+
+  # arbitrary labels: a random permutation of the codes of every categorical variable
+  Xarb <- X
+  for (v in cats) {
+    codes <- sort(unique(Xall[[v]]))
+    Xarb[[v]] <- factor(match(X[[v]], sample(codes)), levels = seq_along(codes))
+  }
+  d <- cbind(Xarb, y = y)
+  m <- ranger(y ~ ., data = d[itr, ], num.trees = n_trees)
+  out["default"] <- mse_real(predict(m, d[ite, ])$predictions, y[ite])
+  m <- ranger(y ~ ., data = d[itr, ], num.trees = n_trees, respect.unordered.factors = "order")
+  out["order (ranger)"] <- mse_real(predict(m, d[ite, ])$predictions, y[ite])
+
+  Xtrain_ord <- X; Xleak_ord <- X
+  for (v in cats) {
+    codes <- sort(unique(Xall[[v]]))
+    Xtrain_ord[[v]] <- order_codes(X[[v]], y, itr, codes)
+    Xleak_ord[[v]]  <- order_codes(X[[v]], y, c(itr, ite), codes)
+  }
+  d <- cbind(Xtrain_ord, y = y)
+  m <- ranger(y ~ ., data = d[itr, ], num.trees = n_trees)
+  out["order (train)"] <- mse_real(predict(m, d[ite, ])$predictions, y[ite])
+  d <- cbind(Xleak_ord, y = y)
+  m <- ranger(y ~ ., data = d[itr, ], num.trees = n_trees)
+  out["order (leaky)"] <- mse_real(predict(m, d[ite, ])$predictions, y[ite])
+  d <- cbind(X, y = y)
+  m <- ranger(y ~ ., data = d[itr, ], num.trees = n_trees)
+  out["order (Supp. 1)"] <- mse_real(predict(m, d[ite, ])$predictions, y[ite])
+
+  oh <- as.data.frame(model.matrix(~ . - 1, data = cbind(Xarb[cats], X[num])))
+  m <- ranger(x = oh[itr, ], y = y[itr], num.trees = n_trees)
+  out["one-hot"] <- mse_real(predict(m, oh[ite, ])$predictions, y[ite])
+  res$n_onehot <<- ncol(oh)
+
+  dv <- cbind(as.data.frame(lapply(Xarb[cats], as.character)), X[num], y = y)
+  cfe <- vtreat::mkCrossFrameNExperiment(dv[itr, ], setdiff(names(dv), "y"), "y", verbose = FALSE)
+  vars <- cfe$treatments$scoreFrame$varName[cfe$treatments$scoreFrame$code %in% c("clean", "catN")]
+  m <- ranger(y ~ ., data = cfe$crossFrame[, c(vars, "y")], num.trees = n_trees)
+  out["vtreat"] <- mse_real(predict(m, vtreat::prepare(cfe$treatments, dv[ite, ], varRestriction = vars))$predictions, y[ite])
+  c(out, var_y = var(y[ite]))
+}
+
+real_runs <- t(sapply(seq_len(n_rep_real), function(r) { cat("subsample", r, "\n"); unlist(real_once(100 + r)) }))
+res$real_runs <- real_runs
+res$real_mean <- colMeans(real_runs)
+res$real_se   <- apply(real_runs, 2, sd) / sqrt(nrow(real_runs))
+
+```
+
+```{r tests_real, echo=FALSE, eval=eval_flag, include=FALSE}
+run_test("real data: six categorical variables with the expected numbers of levels (occupation 529, industry 269)", {
+  expect_equal(unname(res$n_levels[c("occupation", "industry")]), c(529, 269))
+  expect_length(res$n_levels, 6)
+})
+run_test("real data: ranger's own ordering and the hand-made ordering from the training rows agree", {
+  expect_equal(unname(res$real_mean["order (ranger)"]), unname(res$real_mean["order (train)"]), tolerance = 0.02)
+})
+run_test("real data: every method has a finite test error below the variance of log wage", {
+  m <- res$real_mean[setdiff(names(res$real_mean), "var_y")]
+  expect_true(all(is.finite(m)))
+  expect_true(all(m < res$real_mean["var_y"]))
+})
+
+```
+
+```{r table_real, echo=FALSE, eval=TRUE, results='asis'}
+meth <- setdiff(names(res$real_mean), "var_y")
+tab <- data.frame(Method = meth, MSE = unname(res$real_mean[meth]), SE = unname(res$real_se[meth]),
+                  R2 = 1 - unname(res$real_mean[meth]) / res$real_mean["var_y"])
+kbl(tab, format = "latex", booktabs = TRUE, digits = c(0, 4, 4, 3), row.names = FALSE,
+    col.names = c("Method", "Test MSE", "SE", "$R^2$"), escape = FALSE,
+    caption = "Prediction of the log wage from the 13 covariates: test mean squared error and $R^2$, averaged over random subsamples. The SE is over the subsamples.",
+    label = "realtable") %>% kable_styling(latex_options = "HOLD_position")
+
+```
+
+Table \@ref(tab:realtable) gives the results. Ordering by the training means gives a test error of `r f(res$real_mean["order (train)"], 4)`, against `r f(res$real_mean["default"], 4)` for the default with arbitrary labels
+and `r f(res$real_mean["one-hot"], 4)` for one-hot coding (`r res$n_onehot` columns, fitted with the same number of trees). The `vtreat` codes give `r f(res$real_mean["vtreat"], 4)`.
+
+# Leakage
+
+The ordering uses the response, as target encoding does, so in the pipeline of Supplementary 1 it is computed on the same people to whom the forest is later fitted. For a level with few people the mean is mostly noise,
+and a forest fitted to the codes can learn that noise as if it were signal. The row "order (leaky)" in Table \@ref(tab:realtable) estimates the effect: the ordering there is computed with the test rows included and the test error is
+`r f(res$real_mean["order (leaky)"], 4)`, against `r f(res$real_mean["order (train)"], 4)` when the test rows are left out. 
+The leak is `r f(res$real_mean["order (train)"] - res$real_mean["order (leaky)"], 4)` in mean squared error (`r pct((res$real_mean["order (train)"] - res$real_mean["order (leaky)"]) / res$real_mean["order (train)"])`%), `r if (res$real_mean["order (train)"] - res$real_mean["order (leaky)"] > 2 * res$real_se["order (leaky)"]) "more" else "less"` than twice the standard error of the subsamples.
+So with 30,000 training rows it is a small effect. The effect shrinks as the sample grows: in Supplementary 1 the means are computed from 1,061,763 people. In the age-restricted sample of `r f(res$n_age, 0)` an occupation has `r f(res$level_size["50%", "occupation"], 0)` people at the median, `r f(res$level_size["10%", "occupation"], 0)` at the 10th percentile and `r f(res$level_size["0%", "occupation"], 0)` at the smallest. The row "order (Supp. 1)" is better than "order (train)" for the same reason, and because it uses the test rows among its million. The levels with a handful of people are the ones at risk; Supplementary 5 merges the
+levels with fewer than 30 people for that reason. The proper remedy, if it were needed, is to compute the order in the training fold only, or by cross-fitting, which is what `vtreat` does.
+
+# `vtreat` and impact codes
+
+`vtreat` [@zumelVtreatDataFrame2019] replaces each categorical variable by numbers fitted to the response. For a regression, the main one is the *impact code* `catN`: the mean response of the level, minus the overall mean,
+(with shrinkage towards 0 for the levels with few rows). The same idea as the ordering, with the difference that the number is the mean itself, and not only its rank.
+The weak point of all codes made from the response is that a row contributes to the code of its own level, so in the training data the code looks better than it will on new data. `vtreat` avoids that with a *cross-frame*: the code for each training row is computed from the other folds,
+and the codes for new data from the whole training set. This is `mkCrossFrameNExperiment` in the code above. The forest is fitted to the cross-frame and the new data are coded with `prepare`.
+`vtreat` also provides `catP` (the frequency of the level) and `catD` (the deviance of the response given the level), and an estimate of the significance of every new variable, which were not used here.
+
+For this project `vtreat` is an alternative to the ordering. It has two advantages: it protects against the leakage described above, and it keeps the size of the differences between the levels. The disadvantage is that the
+code of a level in the training data is noisier (it is computed on part of the data), and a causal forest needs one set of codes for the whole sample, not one set for every fold. It is not obvious how to use cross-fitted codes
+with `grf`, which is why the pipeline uses the plain ordering.
+
+# Sufficient representations
+
+@johannemannSufficientRepresentationsCategorical2021 treat the same problem for causal inference. As I read it, a representation of a categorical variable is *sufficient* if the variable can be replaced by it without losing information
+that is relevant to the outcome or the treatment effect. They propose several ways of constructing representations, and an R package, `sufrep`, with a function `make_encoder`. One of the methods (`method = "means"`) represents a level by the vector of the means, within that level,
+of the other (continuous) covariates: two occupations whose workers are similar in age, family size, education and so on get similar representations. This does not use the response, so it avoids the leakage of the ordering. The cost is that
+a level is represented by as many numbers as there are continuous covariates, 5 here, rather than by one.
+
+Notes from the earlier attempt, to be followed up:
+
+- the paper has one categorical variable and the wage data has six. `make_encoder` takes one variable at a time and does not see the other categorical variables;
+- with the 23 occupation levels of the reduced data, the five `means` columns took only 23 distinct values, as they must: one vector per level;
+- applying it to `occupation` and `industry` and then fitting `causal_forest` with the encoded columns was started but not completed, and the `policytree` that was fitted to them was never interpreted.
+
+This section has no code that is run here, and the description of the paper is a summary that has not been checked against it.
+
+# Summary
+
+1. The default coding of a factor in `ranger` depends on the alphabetical order of the labels and should not be used for a categorical variable without a natural order (Table \@ref(tab:simtable)).
+2. Ordering the levels by their mean response, and treating the rank as a number, is a good approximation to the exhaustive search over partitions, at the cost of one pass over the data. It is what `respect.unordered.factors = "order"` does in `ranger`, and
+   what Supplementary 1 does for `grf`.
+3. One-hot coding is the alternative that does not use the response. On the wage data its error is `r f(res$real_mean["one-hot"] - res$real_mean["order (train)"], 4)` above that of the ordering, with `r res$n_onehot` columns instead of 13.
+4. The ordering uses the response. For the levels with few people this is a source of optimism that the supplementary files do not correct (Section on leakage). Cross-fitting the codes (`vtreat`) or the means encoding of the `sufrep` package are the two ways to remove it, and both need more work before they could be used with `grf`.
+
+# References {-}
+
+```{r save_results}
+save(res, file = results_file)
+
+```
+
+```{r tests_summary, echo=FALSE, eval=eval_flag}
+writeLines(c(sprintf("%s  %s", test_results$result, test_results$test),
+             sprintf("\n%d passed, %d failed", sum(test_results$result == "PASS"), sum(test_results$result == "FAIL"))), test_log)
+writeLines(capture.output(sessionInfo()), "handling_categorical_variables_session.txt")
+print(test_results[, c("result", "test")], right = FALSE)
+
+```

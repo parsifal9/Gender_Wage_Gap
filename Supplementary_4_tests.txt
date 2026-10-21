@@ -1,0 +1,23 @@
+test	result	detail
+data: each segment has 13 numeric columns, no missing values and one Y, W and weight per row	PASS	
+data: the middle segment is 85 to 90 percent of the sample and all ages are 26 to 53	PASS	
+data: the low segment is more than 90% women and the high segment more than 90% men (unweighted)	PASS	
+data: the segment sizes are in the order low < high < middle, as the text says	PASS	
+mappings: the occupation and industry mappings have the columns new_code and description	PASS	
+mappings: occupation and industry codes are all in the mappings	PASS	
+segments: the raw wage gap is positive in every segment, below 0.22, and smallest in the high propensity segment (0.08 against 0.17 and 0.19)	PASS	
+segments: the weighted share of men is below 15% in the low and above 85% in the high segment, and between 40% and 60% in the middle	PASS	
+segments: education is highest in the middle segment (the text says 19+ years against 16-18 in the extremes)	PASS	
+segments: the high segment has more children per person and a higher share married than the middle	PASS	
+marital: the percentages add to 100 in each segment and gender, and all five codes are present in the data	PASS	
+occupations and industries: the top five of every segment have a description, and the percentages are in decreasing order	PASS	
+occupations and industries: the single largest industry of the high segment is more than a third of it (the text says construction, 42%)	PASS	
+regression: the gender coefficient is positive in both segments and larger in the high (male-dominated) segment (the text says 11% and 17%)	PASS	
+regression: children are negative (p < 0.05) in the low segment and positive (p < 0.001) in the high segment, as the text says	PASS	
+regression: age, education and marital coefficients are positive in both segments and larger in the high segment	PASS	
+wage by occupation and industry: one value per code (occupation and industry codes are ordered by mean wage, so the unweighted order agrees roughly with the weighted one)	PASS	
+counterfactual: the counterfactual gap is smaller than the observed gap, which is close to the overall gap	PASS	
+counterfactual: occupational segregation explains between 0 and 30 percent of the gap (the text says a modest portion)	PASS	
+counterfactual: fewer than 2 percent of men and of women are in occupations without the other gender	PASS	
+race: one code for White and one for Black, and all four race-gender groups are present	PASS	
+figures: every figure file exists and is larger than 5 KB	PASS	

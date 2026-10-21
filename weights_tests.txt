@@ -1,0 +1,9 @@
+PASS  data: 659,436 people aged 26 to 53, 13 covariates, and the weight is not a covariate
+PASS  distribution: the design effect equals 1 + cv^2, and capping lowers it
+PASS  distribution: about 5% of the people are above the cap
+PASS  impact: the difference in means with all weights equal matches the raw mean difference, and the estimates are finite
+PASS  impact: the three groups of weights partition the sample
+PASS  necessity: the weight is not a regressor, so the residual correlation is not forced to 0
+PASS  necessity: the Hausman-type test has the expected degrees of freedom (14 covariates)
+
+7 passed, 0 failed

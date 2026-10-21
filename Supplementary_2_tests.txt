@@ -1,0 +1,25 @@
+test	result	detail
+data: 1,061,763 people and 13 numeric covariates	PASS	
+data: W is 0/1, Y is finite and the weights are positive and finite	PASS	
+data: the capped weights do not exceed the cap, and about 5 percent of people are capped	PASS	
+children: the proportion with dependent children peaks at ages 38-42	PASS	
+children: fewer than 7 percent have dependent children from age 58, and fewer than 20 percent at 53-57	PASS	
+children: there are people aged 20 or less with implausibly many (8 or more) children	PASS	
+children: the age groups cover everyone	PASS	
+age restriction: ages are 26 to 53 and 659,436 people remain (62 percent)	PASS	
+age restriction: all of the vectors have the same length	PASS	
+xtrain: 500,000 people before the age restriction and 310,403 after	PASS	
+difference in means: the weighted regression and the weighted means agree	PASS	
+difference in means: the weighted gap is between 0.15 and 0.22 and the t statistic is above 50	PASS	
+causal forest: the propensities are in [0,1], with no missing values	PASS	
+causal forest: the propensities reach below 0.05 and above 0.95 (the reason for the segments)	PASS	
+causal forest: calibration, mean forest prediction within 0.05 of 1 and differential forest prediction between 1 and 1.4	PASS	
+causal forest: the overlap-weighted ATE is between 0.10 and 0.15 with a standard error below 0.005	PASS	
+trimming: the number kept falls as the threshold rises, and 87 percent are kept at 0.1	PASS	
+trimming: the overlap-weighted ATE is between 0.09 and 0.16 for every threshold and varies by less than 0.01	PASS	
+trimming: calibration stays near 1 (mean within 0.05, differential between 0.9 and 1.4)	PASS	
+segments: they are disjoint and cover the sample	PASS	
+segments: the middle segment is 85 to 90 percent of the age-restricted sample (it was 574,930 people, 87 percent, in one run: the propensities are estimated by a random forest, so a few hundred people near 0.1 or 0.9 change with the seed)	PASS	
+segments: mostly women in the low segment (under 25 percent men), mostly men in the high segment (over 75 percent)	PASS	
+segments: the propensities lie in the right ranges	PASS	
+segments: the saved covariates, outcomes and weights have matching lengths	PASS	

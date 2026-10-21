@@ -1,0 +1,111 @@
+---
+title: "Gender wage gap: instructions for running and navigating the project"
+author: "Rob Dunne, Ainura Tursunalieva"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 2
+    includes:
+      in_header: readme_header.tex
+    extra_dependencies: ["geometry"]
+geometry: "a4paper, margin=2cm"
+---
+
+<!--
+The detail that used to be in README.md: what every file does, how to run the Supplementary files, the directories, and the files made by
+Supplementary 1. README.md is now a short description of the project. Render this file with
+    Rscript -e 'rmarkdown::render("Instructions.Rmd")'
+-->
+
+This file describes the files of the project and how to regenerate the analysis. The aim and the main results are in `README.md`; the shell commands for
+cleaning up and for running everything in order are in `cleanup.Rmd`.
+
+# The files
+
+| File | Description |
+|------|-------------|
+| `Supplementary_1_The_PUBS_data_and_preprocessing.Rmd` | Loads and preprocesses the US Census PUMS/ACS wage data: selects the employed full-time workers (1,061,763 people), makes the 500,000-row `Xtrain`, orders the categorical variables by mean log wage and makes the numeric `X_ordered_numeric`, and the code-to-description mappings. Runs as a script (`render`) from the raw data and has tests (`Supplementary_1_tests.txt`) |
+| `Supplementary_2_First_Look_at_the_Data.Rmd` | Establishes the analysis sample. Documents the dependent-children problem with `children` and restricts the age to 26–53 (659,436 people), caps the Census weights at the 95th percentile, gives the weighted difference in means, fits a first causal forest, estimates propensity scores and splits the data into low / middle / high propensity segments (cut-offs 0.1 and 0.9; the middle segment has 575,120 people, 87%; the forests are seeded, so the segment is reproducible). Saves `capped_weights_segregated_workforce.Rdata` (input to Supp 3, 4 and 5), `numeric_age_truncated_data.Rdata` (input to Supp 5) and `X_age_truncated_data.Rdata` (saved, not currently loaded by any file) |
+| `Supplementary_3_Analysis.Rmd` | Main causal analysis on the middle segment: pooled forest (out-of-bag predictions), separate forests for men and women, IPW and AIPW estimates (all / control / overlap targets), calibration, and heterogeneity of the gap by age, marital status, children, industry and education. Compares the estimators in one table |
+| `Supplementary_4_segregated_workforce.Rmd` | The three propensity segments (mostly women / mixed / mostly men): who is in them, raw gaps (low 0.178, middle 0.189, high 0.099), occupation and industry segregation, and the gap by children in each segment |
+| `Supplementary_5_Oaxaca-Blinder_Decomposition.Rmd` | Oaxaca-Blinder decomposition of the gap (twofold with a pooled reference, threefold, detailed by block) in five nested models, with bootstrap standard errors and weights; compared with the AIPW estimates and repeated within the propensity segments. The unexplained part with all covariates is 0.143 of a raw gap of 0.177 (19% explained) |
+| `Supplementary_10_Some_background_on_Causal_Analysis.Rmd` | Background (no computations): potential outcomes, difference in means, direct, IPW and AIPW estimators, balance, calibration, overlap and the target populations used in Supp 2 to 5 |
+| `cleanup.Rmd` | Shell commands, to paste one block at a time, to remove editor backups, LaTeX files and the intermediate data, to archive the project, and the sequence of `Rscript` commands that regenerates the analysis |
+| `report.Rmd` | Full report. The numbers, tables and analysis figures are read from the `*_results.Rdata` files and `Supplementary_N_figs/` (run Supp 2-5 and `weights.Rmd` first) |
+| `report_brief.Rmd` | Shorter version of the report (figures from `Supplementary_3_figs/`, `Supplementary_4_figs/`; segment shares read from the Supp 4 results) |
+| `gender_wage_gap_report_brief.Rmd` | Older copy of `report_brief.Rmd` from before the October 2026 edits (old numbers, figures from `~/script8.6`); superseded, can be deleted |
+| `report_beamer.Rmd` | Beamer slide deck: "Machine Learning and Causal Inference for Policy Evaluation" (estimates read from the Supp 2/3 results; the two counterfactual-density slides are switched off because their figures, from an old `script2/`, are not in the project) |
+| `weights.Rmd` | Do the Census weights matter? Distribution of the weights (design effect 1.64 raw, 1.41 capped), weighted vs unweighted difference in means, regression and IPW estimates (5–8% lower with weights), and a weight-by-covariate interaction test. Reads `processing_files/X_ordered_numeric_...Rdata`, writes `weights_results.Rdata` and `weights_tests.txt` |
+| `handling_categorical_variables.Rmd` | Why the categorical variables are coded as levels ordered by mean log wage. A runnable simulation (after a Win-Vector example that is not part of the project) and a comparison on the wage data of `ranger`'s default, `"order"`, one-hot and `vtreat`; notes on target-encoding leakage and on the sufficient-representations paper (not run). Not part of the argument of Supp 1–5. The first version (December 2024) is in the git history |
+
+# How to run the Supplementary files
+
+Supplementary 2 to 5 and `weights.Rmd` and `handling_categorical_variables.Rmd` share one structure.
+
+- **Flags** in the setup chunk. `eval_flag` is TRUE to run the analysis (needs `processing_files/` and, for Supp 2 to 5, a lot of memory) and FALSE to knit the text and tables from the saved results file. `fig_eval_flag` (forced FALSE when `eval_flag` is FALSE) runs the chunks that write the figures. The input files, output files, flags and figures of each file are listed in the comment block at its top.
+- **Unit tests.** Chunks named `tests_*` call `run_test("description", {...})` (`testthat`); a failing test means a statement in the text or an assumption of the analysis no longer holds. The last chunk of each file writes `<file>_tests.txt` and `<file>_session.txt`.
+- **Saved results.** Every number in the text and tables is kept in a list `res`, saved to `Supplementary_N_results.Rdata` (and `weights_results.Rdata`, `handling_categorical_variables_results.Rdata`). Knitting with `eval_flag <- FALSE` loads it, so a PDF can be made without the data. The figures are PNG files in `Supplementary_N_figs/`.
+- **Order.** Supp 1 (once, from the raw data; `Rscript -e 'rmarkdown::render("Supplementary_1_...Rmd")'`) then Supp 2 (writes the segment and age-truncated files), then Supp 3, 4 and 5 in any order. Supp 5 optionally reads `Supplementary_2_results.Rdata` and `Supplementary_3_results.Rdata` for comparisons. `weights.Rmd` and `handling_categorical_variables.Rmd` need only the Supp 1 output.
+- **HPC.** `salloc --account=<ACCOUNT> --mem=120GB --nodes=1 --ntasks=1 --cpus-per-task=32 -J interactive -t 4:00:00 srun --cpus-per-task=32 --pty /bin/bash -l`, then `module load pandoc texlive` (memory: 120 GB covers the 74 GB peak seen; Supp 1 needs about 20 GB; use partition `h24`, not `h2`). Run the files from the project directory, since all paths are relative to it.
+- **Test results.** All tests pass in the HPC run of 20 October 2026: Supp 2 (24), Supp 3 (55), Supp 4 (22), Supp 5 (12), `weights.Rmd` (7) and `handling_categorical_variables.Rmd` (6). All of Supp 2 to 5 use the same seeded segmentation (middle segment 575,120).
+
+# Directories
+
+| Directory | Description |
+|-----------|-------------|
+| `Supplementary_2_figs/` | Figures for Supplementary 2: propensity score histograms, parent-by-age plot |
+| `Supplementary_3_figs/` | Figures for Supplementary 3: age/marital/education/industry/children/parenthood wage gap plots, variable importance, wage trajectories, balance plots |
+| `Supplementary_4_figs/` | Figures for Supplementary 4: gender plot, industry and occupation segregation plots, segment comparison |
+| `Supplementary_5_figs/` | Figures for Supplementary 5: explained / unexplained parts by model, detailed contributions |
+| `weights_figs/` | Figures for `weights.Rmd`: distribution of the weights, weights by age |
+| `Supplementary_4_segregated_workforce_files/` | Supporting files (figure-latex) generated by knitr when compiling Supplementary 4 |
+| `report_figs/` | Pictures used in the reports that are not made by the analysis (WGEA chart, photos, wage-growth figures). The older analysis figures in it are no longer used by `report.Rmd` |
+| `report_brief_figs/` | Figures used in the brief report |
+| `processing_files/` | Intermediate `.Rdata` files from the pipeline: Supp 1 outputs (below) and Supp 2 outputs (`capped_weights_segregated_workforce.Rdata`, `numeric_age_truncated_data.Rdata`, `X_age_truncated_data.Rdata`) |
+| `processing_files_temp/` | Empty; formerly held temporary processing outputs |
+| `US_census_occupation_industry_codes/` | US Census lookup CSVs for occupation codes (2018) and industry codes (2017) with crosswalks |
+
+# Files saved by `Supplementary_1_The_PUBS_data_and_preprocessing.Rmd`
+
+
+All are written to `processing_files/` (the variable `wage_file_outputs`). Where each is used was checked by reading the `.Rmd` files, not by inspecting the files on disk.
+
+There are two analysis data sets:
+
+- `Xtrain_500000_20.Rdata`: a random sample of 500,000 rows in which 8 of the 13 covariates are factors (occupation reduced to 23 levels, industry to 20).
+- `X_ordered_numeric_1061763_industry_269.Rdata`: the full data set (1,061,763 rows) with 13 numeric covariates, keeping the full 529 occupation and 269 industry levels.
+
+**How factors are turned into numeric variables.** Many of the methods used (in particular GRF) need numeric covariates, and one-hot encoding 529 occupations is impractical. Instead each factor is given a single numeric code that emulates `ranger`'s `respect.unordered.factors = "order"`:
+
+1. For each of `race`, `citizenship`, `marital`, `economic_region`, `occupation` and `industry`, compute the mean log hourly wage of each level over the full cleaned data set.
+2. Sort the levels by that mean and recode them $1, \dots, k$, so level 1 has the lowest mean wage and level $k$ the highest.
+3. `hispanic_origin` and `nativity` are binary and are recoded 0/1. `education_level` was already converted to approximately years of schooling in Supp 1.
+
+The ordering is done once on the full data set, before any split. (An earlier version ordered train and test separately, which gave different codes in each.) Two consequences: the codes are only meaningful as a wage ranking, not as distances, and they are computed from the outcome, so they are a form of target encoding using the unweighted mean. `handling_categorical_variables.Rmd` measures the resulting leakage on 30,000-row subsamples (about 2% of the test error, within sampling error) and expects it to be smaller with a million rows; Supp 5 merges levels with fewer than 30 people of either gender. The codes are therefore not comparable with the original PUMS codes, and the mapping back to descriptions is saved in `variable_mappings.Rdata` (see below). The alternatives (`ranger`'s default, `"order"` and `"partition"`, one-hot, `vtreat`) are compared in `handling_categorical_variables.Rmd` (compiled to `handling_categorical_variables.pdf`); the method used here corresponds to its "order" setting, which gave the lowest test error among the methods that need no cross-fitting.
+
+In more detail:
+
+| File | Objects | Contents | Used in |
+|------|---------|----------|---------|
+| `Xtrain_500000_20.Rdata` | `Xtrain`, `W`, `Y`, `weights_supplied`, `weights_dummy` | Random sample of 500,000 rows (seed 124), excluding region "Abroad". `Xtrain` has 13 covariates: 8 factors (occupation reduced to 23 levels, industry to 20) and 5 numeric. `Y` is log hourly wage, `W` is 1 for male, `weights_supplied` are the Census weights, `weights_dummy` is all 1s. | Loaded by Supp 2 only, to save an age-truncated copy (`X_age_truncated_data.Rdata`); that copy is not loaded by any file at present. Not used by Supp 3 to 5, `weights.Rmd`, or the reports. |
+| `X_ordered_numeric_1061763_industry_269.Rdata` | `Y`, `W`, `X_ordered_numeric`, `weights_supplied`, `weights_dummy` | Full cleaned sample of 1,061,763 rows, 13 numeric covariates. `race`, `citizenship`, `marital`, `economic_region`, `occupation` (529 levels) and `industry` (269 levels) are recoded 1 to $k$ in increasing order of mean log wage; `hispanic_origin` and `nativity` are 0/1. | Loaded by Supp 2, which is the source of everything Supp 3, 4 and 5 use (`numeric_age_truncated_data.Rdata`, `capped_weights_segregated_workforce.Rdata`). Also loaded by `weights.Rmd` and `handling_categorical_variables.Rmd`. |
+| `industry_mapping_full_description.Rdata` | `industry_mapping_full_description` | Data frame (`original_code`, `new_code`, `description`) mapping the 1 to 269 industry codes back to NAICS codes and names. | Loaded by Supp 3 and Supp 4 (industry labels). Also inside `variable_mappings.Rdata`. |
+| `occupation_mapping_full_description.Rdata` | `occupation_mapping_full_description` | The same mapping for the 529 occupation codes (SOC). | Loaded by Supp 4 (occupation labels). |
+| `variable_mappings.Rdata` | `race_mapping`, `citizenship_mapping`, `marital_mapping`, `economic_region_mapping`, `industry_mapping_full_description`, `occupation_mapping_full_description` | All six code-to-description mappings together. | Loaded by Supp 4 (`race_mapping` only is used there). The citizenship, marital and economic-region mappings are not referenced anywhere; Supp 3 and 4 hard-code the marital labels. |
+
+Saves in Supp 1 that are commented out (not produced): `X_1061763_15_industry_271_temp.Rdata`, and the `Xtest*` files. None of the reports, `Supplementary_10`, `handling_categorical_variables.Rmd`, `report_beamer.Rmd` or `gender_wage_gap_report_brief.Rmd` load any Supp 1 output. Supp 1 runs as a script (the old and exploratory chunks keep `eval=FALSE`); its mapping chunk saves the occupation descriptions as character rather than list columns (Supp 4 still converts them defensively with `as_character_column()`) and its tests, including those of the mappings, are in `Supplementary_1_tests.txt`. The `citizenship` mapping test used to fail because `citizenship` is numeric in `X`; the test now takes the levels from the values.
+
+# Other files
+
+| File | Description |
+|------|-------------|
+| `wageinequality.bib` | BibTeX bibliography for all documents |
+| `Supplementary_3_Analysis.tex` | LaTeX output generated from Supplementary 3 |
+| `Supplementary_4_segregated_workforce.tex` | LaTeX output generated from Supplementary 4 |
+| `longtable_occupation_categories.tex` | LaTeX longtable of occupation category codes |
+| `handling_categorical_variables.pdf`, `weights.pdf` | Compiled PDFs of the two side documents |
+| `Discussion.Rmd` | Review notes on the pipeline: which weights are used where, the NaN estimates, the 95th percentile cap, open problems and recommendations |
+| `Supplementary_N_results.Rdata`, `Supplementary_N_tests.txt`, `Supplementary_N_session.txt` (N = 2 to 5), `weights_*`, `handling_categorical_variables_*` | Outputs of the runs: saved numbers, test results, session information |
+| `Notes.Rmd`, `Notes.tex` | Scratch notes |
+| `README.md` | Short description of the project (what it does, the main results, the main files) |

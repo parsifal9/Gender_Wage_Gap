@@ -24,7 +24,9 @@ Supplementary_3_figs/forest_tau_predictions.Rdata
 aa
 Supplementary_3_checks.txt
 *.pdf
-*_results.Rdata
+*_tests.txt
+*_session.txt
 
 # private notes (HPC account code, personal paths)
 Notes.Rmd
+GitHub_setup.md

@@ -1,8 +1,0 @@
-PASS  simulation: every method gives a finite test error that is not below the noise variance (allowing for sampling error)
-PASS  simulation: partition was run only for k <= 10
-PASS  simulation: relabelling the levels changes the default but there are 30 distinct labellings
-PASS  real data: six categorical variables with the expected numbers of levels (occupation 529, industry 269)
-PASS  real data: ranger's own ordering and the hand-made ordering from the training rows agree
-PASS  real data: every method has a finite test error below the variance of log wage
-
-6 passed, 0 failed

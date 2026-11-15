@@ -43,11 +43,27 @@ se_diff <- sqrt(se_mean[-1]^2 + se_mean[1]^2)
 se_plot <- c(se_mean[1], sqrt(se_mean[1]^2 + se_diff^2))
 marital$ci_lower <- marital$estimate - 1.96 * se_plot
 marital$ci_upper <- marital$estimate + 1.96 * se_plot
+pums_source <- "Supplementary_3_checks.txt, run of 2026-10-15; n = 566,866 (ages 26-53, propensity 0.1 to 0.9); marital interval is sd/sqrt(n) (too narrow)"
+
+# If the doubly-robust subgroup file is present (made by forest_tau_subgroups.R on the saved forest), use its honest
+# marital intervals -- average_treatment_effect(forest.tau, subset = group) -- and its live variable importance, in
+# place of the copied numbers above. This is the apples-to-apples version: the HILDA side estimates its subgroups the
+# same way. scp forest_tau_subgroups.rds here first; without it the script falls back to the copied numbers.
+dr_path <- Sys.getenv("FOREST_TAU_SUBGROUPS", "forest_tau_subgroups.rds")
+if (file.exists(dr_path)) {
+  dr <- readRDS(dr_path)
+  marital <- data.frame(status = dr$marital$status, estimate = dr$marital$estimate, se = dr$marital$se,
+                        n = dr$marital$n, ci_lower = dr$marital$ci_lower, ci_upper = dr$marital$ci_upper)
+  importance  <- dr$importance                       # live, sorted, sums to 1
+  pums_source <- paste0("doubly-robust from ", dr$meta)
+  cat("Using doubly-robust marital intervals and live importance from ", dr_path, "\n")
+} else {
+  cat("No ", dr_path, " found; using the copied (too-narrow) marital interval and copied importance.\n", sep = "")
+}
 
 stopifnot(abs(sum(importance) - 1) < 0.002, names(importance) %in% balance$variable,
           which.max(marital$estimate) == 5, which.min(marital$estimate) == 1)
 
-saveRDS(list(importance = importance, balance = balance, marital = marital,
-             source = "Supplementary_3_checks.txt, run of 2026-10-15; n = 566,866 (ages 26-53, propensity 0.1 to 0.9)"),
+saveRDS(list(importance = importance, balance = balance, marital = marital, source = pums_source),
         "Supplementary_3_figs/pums_plot_data_cmp.rds")
 print(marital)

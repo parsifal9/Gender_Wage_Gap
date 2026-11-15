@@ -21,6 +21,7 @@
 processing_files/
 processing_files_temp/
 Supplementary_3_figs/forest_tau_predictions.Rdata
+forest_tau.rds
 aa
 Supplementary_3_checks.txt
 *.pdf

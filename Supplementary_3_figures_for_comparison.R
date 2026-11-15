@@ -61,8 +61,11 @@ if (file.exists(dr_path)) {
   cat("No ", dr_path, " found; using the copied (too-narrow) marital interval and copied importance.\n", sep = "")
 }
 
-stopifnot(abs(sum(importance) - 1) < 0.002, names(importance) %in% balance$variable,
-          which.max(marital$estimate) == 5, which.min(marital$estimate) == 1)
+# Never married has the smallest gap in both orderings. Married is the largest among the plug-in group means, but under
+# the doubly-robust estimate the small "Separated" group edges above it (with a wide interval), so only the minimum is
+# asserted here.
+stopifnot(abs(sum(importance) - 1) < 0.002, all(names(importance) %in% balance$variable),
+          which.min(marital$estimate) == 1)
 
 saveRDS(list(importance = importance, balance = balance, marital = marital, source = pums_source),
         "Supplementary_3_figs/pums_plot_data_cmp.rds")

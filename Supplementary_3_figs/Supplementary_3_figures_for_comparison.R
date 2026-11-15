@@ -12,9 +12,15 @@
 #   importance <- var_imp;  balance <- abs.mean.diff / std and abs.mean.diff.adj / std.adj;
 #   marital    <- plot_data (estimate, ci_lower, ci_upper).
 #
+# Since 15 November 2026 the forest is saved (forest_tau.rds, see Supplementary_3_Analysis.Rmd). When
+# Supplementary_3_figs/forest_tau_subgroups.rds (made from it by forest_tau_subgroups.R) is present, the marital gaps and
+# the importance below are replaced by the doubly robust and live values from that forest; the balance table is still
+# the copied one.
+#
 # The propensity score histogram is not here: its values are not recorded anywhere, so the comparison uses the existing
 # figure Supplementary_3_figs/propensities_capped_weights_age_trimmed.png.
 #
+# Run from the repository root:  Rscript Supplementary_3_figs/Supplementary_3_figures_for_comparison.R
 # Output: Supplementary_3_figs/pums_plot_data_cmp.rds
 
 # variable importance of the causal forest (13 covariates, sums to 1)
@@ -48,14 +54,15 @@ pums_source <- "Supplementary_3_checks.txt, run of 2026-10-15; n = 566,866 (ages
 # If the doubly-robust subgroup file is present (made by forest_tau_subgroups.R on the saved forest), use its honest
 # marital intervals -- average_treatment_effect(forest.tau, subset = group) -- and its live variable importance, in
 # place of the copied numbers above. This is the apples-to-apples version: the HILDA side estimates its subgroups the
-# same way. scp forest_tau_subgroups.rds here first; without it the script falls back to the copied numbers.
-dr_path <- Sys.getenv("FOREST_TAU_SUBGROUPS", "forest_tau_subgroups.rds")
+# same way. scp forest_tau_subgroups.rds into Supplementary_3_figs/ first; without it the script falls back to the copied numbers.
+dr_path <- Sys.getenv("FOREST_TAU_SUBGROUPS", "Supplementary_3_figs/forest_tau_subgroups.rds")
 if (file.exists(dr_path)) {
   dr <- readRDS(dr_path)
   marital <- data.frame(status = dr$marital$status, estimate = dr$marital$estimate, se = dr$marital$se,
                         n = dr$marital$n, ci_lower = dr$marital$ci_lower, ci_upper = dr$marital$ci_upper)
   importance  <- dr$importance                       # live, sorted, sums to 1
-  pums_source <- paste0("doubly-robust from ", dr$meta)
+  pums_source <- paste0("marital and importance: doubly-robust / live from ", dr$meta,
+                        "; balance: Supplementary_3_checks.txt, run of 2026-10-15 (n = 566,866)")
   cat("Using doubly-robust marital intervals and live importance from ", dr_path, "\n")
 } else {
   cat("No ", dr_path, " found; using the copied (too-narrow) marital interval and copied importance.\n", sep = "")

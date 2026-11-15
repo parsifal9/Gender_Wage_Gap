@@ -13,17 +13,18 @@
 # HPC, not a laptop). It needs only grf and the forest; it does not refit anything (average_treatment_effect reuses the
 # stored Y.hat/W.hat/predictions, so it is quick once the forest is loaded).
 #
-#   Rscript forest_tau_subgroups.R [forest_tau.rds] [forest_tau_subgroups.rds]
-#   FOREST_TAU=~/forest_tau.rds Rscript forest_tau_subgroups.R      # path also via env
+# Run from the repository root (the paths below are relative to it):
+#   Rscript Supplementary_3_figs/forest_tau_subgroups.R [forest_tau.rds] [output.rds]
+#   FOREST_TAU=~/forest_tau.rds Rscript Supplementary_3_figs/forest_tau_subgroups.R      # path also via env
 #
-# Output: forest_tau_subgroups.rds -- a small list(marital, importance, overall, meta). scp it back to the laptop and
+# Output: Supplementary_3_figs/forest_tau_subgroups.rds -- a small list(marital, importance, overall, meta). scp it back to the laptop and
 # Supplementary_3_figures_for_comparison.R folds it into pums_plot_data_cmp.rds.
 
 suppressMessages(library(grf))
 
 args     <- commandArgs(trailingOnly = TRUE)
 in_path  <- if (length(args) >= 1) args[1] else Sys.getenv("FOREST_TAU", "forest_tau.rds")
-out_path <- if (length(args) >= 2) args[2] else "forest_tau_subgroups.rds"
+out_path <- if (length(args) >= 2) args[2] else "Supplementary_3_figs/forest_tau_subgroups.rds"
 in_path  <- path.expand(in_path)
 
 cat("Loading", in_path, "...\n"); flush.console()

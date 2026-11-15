@@ -433,7 +433,8 @@ forest.tau <- causal_forest(
 
 # Save the fitted forest so the by-group gaps can be recomputed as proper doubly-robust estimates
 # (average_treatment_effect(forest.tau, subset = <group indices>)) for the HILDA comparison, without
-# refitting the forest. Large file (659k rows x 2000 trees); git-ignored. See Supplementary_3_figures_for_comparison.R.
+# refitting the forest. Large file (about 4 GB: 575,120 rows x 2000 trees); git-ignored. See
+# Supplementary_3_figs/forest_tau_subgroups.R and Supplementary_3_figs/Supplementary_3_figures_for_comparison.R.
 saveRDS(forest.tau, "forest_tau.rds")
 
 forest.ate <- average_treatment_effect(forest.tau , target.sample = "all")

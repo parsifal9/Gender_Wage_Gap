@@ -1,0 +1,20 @@
+---
+title: "PUMS analysis: things to do"
+author: "Rob Dunne"
+output: pdf_document
+---
+
+# Things to do when the data are next processed again
+
+## The region "Abroad"
+
+`economic_region` has 9 levels: the eight BEA regions and "Abroad" (place of work outside the US). "Abroad" is kept in the main data
+(`X_ordered_numeric`, and so in Supplementary 2 to 5 and every forest). It was dropped only from the 500,000-row factor sample `Xtrain`
+(Supplementary 1, chunk `xtrain_save`), because a package fitted to `Xtrain` gave the error "Categorical: <5 samples in a category".
+That was a workaround, not a decision about the analysis: `X` is rebuilt from `data` in chunk `xfull_setup`, so the drop never reached
+`X_ordered_numeric`.
+
+"Abroad" has the highest mean log wage of the regions (code 9) and is probably a small and unusual group (for example, people posted
+overseas). We could remove it when we process all the data again: drop it in Supplementary 1 before the levels are ordered (so the
+codes run 1 to 8), and then re-run Supplementary 2 to 5. The tests that expect 9 regions (Supplementary 1 `tests_full`, the mapping
+summary) would change to 8. Check first how many people it is: `sum(X_ordered_numeric$economic_region == 9)`.

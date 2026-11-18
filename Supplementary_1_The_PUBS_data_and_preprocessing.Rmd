@@ -1313,10 +1313,10 @@ if (fig_eval_flag) {
 dir.create("Supplementary_1_figs", showWarnings = FALSE)
 
 # Plot mean wages by new code for each variable.
-# With a mapping, each point is labelled with its level name, written downwards from the point. The codes are in increasing order
-# of mean wage, so the line rises and the space below each point is free: the labels cannot cross the line or each other.
-# The vertical axis is extended downwards to make room for the labels (and the labels are made smaller if the plot is too short).
-# Industry and occupation have too many levels to label.
+# With a mapping, each point is labelled with its level name, written horizontally and ending just below and to the left of the
+# point (srt = 0, adj = c(1, 0.5) in text(); srt = 90 writes them downwards from the point instead). The x axis starts one code
+# early to make room for the first label. The room below the points (need, R, ylim) is calculated for labels written downwards,
+# so with horizontal labels there is spare space at the bottom of the plot. Industry and occupation have too many levels to label.
 plot_wage_by_code <- function(X_numeric, Y, var_name, title, mapping = NULL, labels = NULL, cex_lab = 0.7) {
   mean_wages <- tapply(Y, X_numeric[[var_name]], mean)
   codes <- as.numeric(names(mean_wages))
@@ -1335,10 +1335,10 @@ plot_wage_by_code <- function(X_numeric, Y, var_name, title, mapping = NULL, lab
     top <- max(mean_wages)
     R <- max(1.05 * diff(range(mean_wages)), (top - mean_wages) / (0.97 - 1.04 * nd))
     plot(codes, mean_wages, xlab = "New Code", ylab = "Mean Log Wage", main = title, pch = 19, col = "steelblue", type = "b",
-         ylim = c(top - R, top + 0.04 * R), yaxs = "i", xlim = range(codes) + c(-0.5, 0.5), xaxt = "n")
+         ylim = c(top - R, top + 0.04 * R), yaxs = "i", xlim = range(codes) + c(-1, 0.5), xaxt = "n")
     axis(1, at = codes)
     grid()
-    text(codes, mean_wages - 0.03 * R, lab, srt = 90, adj = c(1, 0.5), cex = cex_lab)
+    text(codes, mean_wages - 0.03 * R, lab, srt = 0, adj = c(1, 0.5), cex = cex_lab)
   }
 }
 
@@ -1350,7 +1350,7 @@ plots <- list(
   industry        = list("Industry"),
   occupation      = list("Occupation"),
   race            = list("Race", race_mapping),
-  citizenship     = list("Citizenship", citizenship_mapping, citizenship_short),
+  citizenship     = list("Nativity", citizenship_mapping, citizenship_short),
   marital         = list("Marital Status", marital_mapping),
   economic_region = list("Economic Region", economic_region_mapping)
 )
@@ -1369,7 +1369,35 @@ par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
 for (v in names(plots)) do.call(plot_wage_by_code, c(list(X_ordered_numeric, Y, v), plots[[v]]))
 par(mfrow = c(1, 1))
 dev.off()
+
+# marital status by sex: men (W == 1) in blue with the labels, women (W == 0) in red
+png(paste0("Supplementary_1_figs/mapping_wage_by_code_", "marital_by_sex", ".png"), width = 1800, height = 1200, res = 300)
+plot_wage_by_code(X_ordered_numeric[W==1,], Y[W==1], "marital",         "Marital Status",  marital_mapping) #male
+mean_wages <- tapply(Y[W==0], X_ordered_numeric[["marital"]][W==0], mean)                                   #female
+codes <- as.numeric(names(mean_wages))
+points(codes, mean_wages,type="b",col="red")
+legend("bottomright", c("male","female"), pch=c(19, 1), col=c("steelblue","red"))
+dev.off()
+
+# marital status by children: with dependent children in blue with the labels, without in red
+png(paste0("Supplementary_1_figs/mapping_wage_by_code_", "marital_by_children", ".png"), width = 1800, height = 1200, res = 300)
+children<-ifelse(X_ordered_numeric$children==0,0,1)
+plot_wage_by_code(X_ordered_numeric[children==1,], Y[children==1], "marital",         "Marital Status",  marital_mapping) #children
+mean_wages <- tapply(Y[children==0], X_ordered_numeric[["marital"]][children==0], mean)                             #no children
+codes <- as.numeric(names(mean_wages))
+points(codes, mean_wages,type="b",col="red")
+legend("bottomright", c("children","no children"), pch=c(19, 1), col=c("steelblue","red"))
+dev.off()
 }
+
+# To draw the plots one at a time when stepping through this file (run the lines above that define plot_wage_by_code,
+# citizenship_short and the mappings first):
+# plot_wage_by_code(X_ordered_numeric, Y, "industry",        "Industry")
+# plot_wage_by_code(X_ordered_numeric, Y, "occupation",      "Occupation")
+# plot_wage_by_code(X_ordered_numeric, Y, "race",            "Race",            race_mapping)
+# plot_wage_by_code(X_ordered_numeric, Y, "citizenship",     "Nativity",     citizenship_mapping, citizenship_short)
+# plot_wage_by_code(X_ordered_numeric, Y, "marital",         "Marital Status",  marital_mapping)
+# plot_wage_by_code(X_ordered_numeric, Y, "economic_region", "Economic Region", economic_region_mapping)
 
 # ============================================================
 # PART 4: SAVE MAPPINGS

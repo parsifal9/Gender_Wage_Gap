@@ -42,6 +42,25 @@ The numbers come from the run of October 2026; the exact figures, with standard 
 To regenerate the analysis, run Supplementary 1 and then 2, then 3, 4 and 5 (each with `Rscript -e 'rmarkdown::render("<file>")'`); the details, the HPC settings and the
 unit tests are in `Instructions.Rmd`. The raw data file (`wage_data.Rdata`) is not in the repository.
 
+## What happens to the data along the way
+
+The categorical variables are coded once, in Supplementary 1 (chunk `order_levels`): the levels of race, citizenship, marital, economic_region, occupation
+and industry are put in increasing order of mean log wage, on the full sample of 1,061,763, and replaced by the numbers 1, ..., k (hispanic_origin
+and nativity become 0/1 in chunk `recode_binary`). No later file changes the codes. Because the order is set on the full sample, a higher code need not
+mean a higher mean wage in the age-restricted or trimmed samples used later. The maps from code to level are in `variable_mappings.Rdata`.
+
+| File | What it does to the data | What it saves (in `processing_files/`) |
+|---|---|---|
+| Supp 1 | Selects age 17 or more, more than 48 weeks, more than 16 hours, employed, not self-employed; drops `children == -1` (the missing-value code); builds `log_wage`; orders and codes the factors | `X_ordered_numeric_1061763_industry_269.Rdata` (the main data); `Xtrain_500000_20.Rdata` (a separate factor version: a sample of 500,000, 23 occupations, 20 industries, region "Abroad" dropped); the mapping files |
+| Supp 2 | Caps the weights at the 95th percentile; keeps ages 26 to 53 (659,436 people); estimates the propensities and splits the sample into low / middle / high segments at 0.1 and 0.9 | `numeric_age_truncated_data.Rdata`, `capped_weights_segregated_workforce.Rdata`, `X_age_truncated_data.Rdata` (not loaded by any file) |
+| Supp 3 | Uses the middle segment as it is | `forest_tau.rds` (in the project directory) and the results file |
+| Supp 4 | Uses the three segments as they are | results and figures only |
+| Supp 5 | Builds its regression variables in memory: age centred and scaled, children capped at 4, family size at 6, rare levels merged into "other" | results and figures only |
+| `weights.Rmd`, `handling_categorical_variables.Rmd` | Apply the 26 to 53 age filter in memory | results only |
+
+`processing_files/` is git-ignored and exists only where the pipeline has been run (the HPC). The region "Abroad" (place of work outside the US) is
+dropped only from `Xtrain_500000_20.Rdata`; the main data keep it as one of the 9 levels of economic_region.
+
 ## Reference
 
 Dunne, R. (2025). Gender wage gap analysis using machine learning methods. In S. M. Cuddy, K. Holland, J. Boland, S. Westra and O. Batelaan (eds),

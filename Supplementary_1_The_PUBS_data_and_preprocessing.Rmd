@@ -1313,10 +1313,11 @@ if (fig_eval_flag) {
 dir.create("Supplementary_1_figs", showWarnings = FALSE)
 
 # Plot mean wages by new code for each variable.
-# With a mapping, the points are labelled with the level name: the code is on the vertical axis and the mean log wage on the
-# horizontal one, so each label sits on its own line to the right of its point. Without a mapping (industry, occupation: too many
-# levels to label) the code is on the horizontal axis.
-plot_wage_by_code <- function(X_numeric, Y, var_name, title, mapping = NULL, labels = NULL) {
+# With a mapping, each point is labelled with its level name, written downwards from the point. The codes are in increasing order
+# of mean wage, so the line rises and the space below each point is free: the labels cannot cross the line or each other.
+# The vertical axis is extended downwards to make room for the labels (and the labels are made smaller if the plot is too short).
+# Industry and occupation have too many levels to label.
+plot_wage_by_code <- function(X_numeric, Y, var_name, title, mapping = NULL, labels = NULL, cex_lab = 0.7) {
   mean_wages <- tapply(Y, X_numeric[[var_name]], mean)
   codes <- as.numeric(names(mean_wages))
   if (is.null(mapping)) {
@@ -1325,12 +1326,19 @@ plot_wage_by_code <- function(X_numeric, Y, var_name, title, mapping = NULL, lab
   } else {
     if (is.null(labels)) labels <- mapping$description
     lab <- labels[match(codes, mapping$new_code)]
-    xr <- range(mean_wages)
-    plot(mean_wages, codes, xlab = "Mean Log Wage", ylab = "New Code", main = title, pch = 19, col = "steelblue", type = "b",
-         xlim = c(xr[1], xr[2] + 0.9 * diff(xr)), yaxt = "n")
-    axis(2, at = codes, las = 1)
+    # the share of the plot height that each label needs (its length in inches plus a gap, over the plot height in inches)
+    need <- function(cex) (strwidth(lab, units = "inches", cex = cex) + 0.08) / par("pin")[2]
+    while (max(need(cex_lab)) > 0.6) cex_lab <- 0.9 * cex_lab
+    nd <- need(cex_lab)
+    # the axis runs from top - R to top + 0.04 R (yaxs = "i", so 1.04 R is the full plot height). Label i starts 0.03 R below point i
+    # and is nd[i] * 1.04 R long, so it must satisfy mean_wages[i] - 0.03 R - 1.04 nd[i] R >= top - R
+    top <- max(mean_wages)
+    R <- max(1.05 * diff(range(mean_wages)), (top - mean_wages) / (0.97 - 1.04 * nd))
+    plot(codes, mean_wages, xlab = "New Code", ylab = "Mean Log Wage", main = title, pch = 19, col = "steelblue", type = "b",
+         ylim = c(top - R, top + 0.04 * R), yaxs = "i", xlim = range(codes) + c(-0.5, 0.5), xaxt = "n")
+    axis(1, at = codes)
     grid()
-    text(mean_wages, codes, lab, pos = 4, cex = 0.7)
+    text(codes, mean_wages - 0.03 * R, lab, srt = 90, adj = c(1, 0.5), cex = cex_lab)
   }
 }
 

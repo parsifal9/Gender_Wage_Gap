@@ -87,7 +87,7 @@ The training sample used in the GRF analyses is 500,000 records drawn without re
 | `citizenship` | 5 | 1 = Born in the US; 2 = Born in Puerto Rico, Guam, US Virgin Islands, or Northern Marianas; 3 = Born abroad of American parent(s); 4 = US citizen by naturalisation; 5 = Not a US citizen. Stored as numeric (1--5) in the raw data but treated as ordered factor. |
 | `nativity` | 2 | native / foreign-born; coded 1/0 in the ordered-numeric version |
 | `marital` | 5 | married, never married, divorced, separated, widowed |
-| `economic_region` | 9 (→ 8 used) | Nine BEA (Bureau of Economic Analysis) economic regions plus "Abroad". The "Abroad" category is dropped from the training data as it produces fewer than 5 samples in a GRF node. |
+| `economic_region` | 9 | The eight BEA (Bureau of Economic Analysis) economic regions plus "Abroad" (place of work outside the US). All 9 are kept in the main data (`X_ordered_numeric`); "Abroad" is dropped only from the 500,000-row factor sample `Xtrain`, where it gave categories with fewer than 5 people. |
 | `occupation` | 529 → 23 | Full SOC (Standard Occupational Classification) code with 529 levels, reduced to 23 categories by taking the first two digits of the SOC code. |
 | `industry` | 269 → 20 | Full NAICS code with 269 levels, reduced to 20 categories by NAICS sector grouping. Consolidations: 32/33/3M → 31; 42 → 41; 45/4M → 44; 49 → 48; 92 → 91. |
 

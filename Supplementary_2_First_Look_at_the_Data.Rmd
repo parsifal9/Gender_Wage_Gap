@@ -48,7 +48,7 @@ INPUT FILES (paths relative to the project directory; wage_file_outputs <- "./pr
 OUTPUT FILES:
   processing_files/capped_weights_segregated_workforce.Rdata      the low / middle / high propensity segments (input to Supplementary_3 and 4)
   processing_files/numeric_age_truncated_data.Rdata               the age-restricted numeric data (input to Supplementary_5)
-  processing_files/X_age_truncated_data.Rdata                     the age-restricted Xtrain sample (input to Supplementary_5)
+  processing_files/X_age_truncated_data.Rdata                     the age-restricted Xtrain sample (not loaded by any file at present)
   Supplementary_2_results.Rdata                                   the list res: every number in the text and tables
   Supplementary_2_tests.txt, Supplementary_2_session.txt          test results and session information
   Supplementary_2_figs/parent_by_age.png, Supplementary_2_figs/capped_weighted_age_truncted_propensities_hstogram.png

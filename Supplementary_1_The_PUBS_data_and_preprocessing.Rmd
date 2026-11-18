@@ -46,7 +46,9 @@ OUTPUT FILES (written to wage_file_outputs <- "./processing_files/", which is cr
   industry_mapping_full_description.Rdata, occupation_mapping_full_description.Rdata, variable_mappings.Rdata    numeric code -> description
   Supplementary_1_results.Rdata                    the list res: the counts behind the text and the tests
   Supplementary_1_tests.txt, Supplementary_1_session.txt    test results and session information
-  Supplementary_1_figs/                            wage by code plots (only if fig_eval_flag)
+  Supplementary_1_figs/                            wage by code plots (only if fig_eval_flag): mean_wage_by_code.png, mapping_wage_by_code.png (six panels)
+                                                   and one file per variable, mapping_wage_by_code_<variable>.png (race, citizenship, marital and
+                                                   economic_region have the points labelled with the level name)
 
 FLAGS (set in the setup chunk):
   eval_flag      TRUE runs the processing chunks (needs the raw data and about 20 GB of memory). FALSE only knits the text.
@@ -287,6 +289,7 @@ run_test("data: the 24 education levels are all used, and each one has a single 
   expect_equal(sum(table(data$education)), 1061763)
   expect_true(all(rowSums(table(data$education, data$education_level) > 0) == 1))
 })
+
 ```
 
 
@@ -459,6 +462,7 @@ run_test("Xtrain: the saved file reloads with the same objects", {
   expect_setequal(ls(e), c("Xtrain", "W", "Y", "weights_supplied", "weights_dummy"))
   expect_equal(dim(e$Xtrain), c(500000, 13))
 })
+
 ```
 ```{R, echo=FALSE, eval=FALSE}
 ## table of variable types and number of levels
@@ -912,6 +916,7 @@ run_test("full sample: log wages are finite and the saved file reloads with the 
   expect_setequal(ls(e), c("Y", "W", "X_ordered_numeric", "weights_supplied", "weights_dummy"))
   expect_equal(dim(e$X_ordered_numeric), c(1061763, 13))
 })
+
 ```
 
 - not using this any longer  i.e. using X_ordered_numeric ) $1061763 \times 13$, but not selecting 
@@ -966,6 +971,7 @@ Most common PUMS English proficiency coding:
     2: "Well"
     3: "Very well"
     4: "Speaks only English"
+
 ```
 
 ```{R mappings, echo=FALSE, eval=eval_flag}
@@ -1282,8 +1288,7 @@ race_tests <- test_all(
 citizenship_tests <- test_all(
   citizenship_mapping, X, X_ordered_numeric, Y,
   "citizenship", "CITIZENSHIP MAPPING"
-)# SOME TESTS FAILED OR HAVE WARNINGS
-# class(X$citizenship) is numeric
+)#ALL TESTS PASSED
 
 marital_tests <- test_all(
   marital_mapping, X, X_ordered_numeric, Y,
@@ -1306,29 +1311,54 @@ cat(strrep("=", 60), "\n\n")
 
 if (fig_eval_flag) {
 dir.create("Supplementary_1_figs", showWarnings = FALSE)
-png("Supplementary_1_figs/mapping_wage_by_code.png", width = 2000, height = 2400, res = 300)
-par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
 
-# Plot mean wages by new code for each variable
-plot_wage_by_code <- function(X_numeric, Y, var_name, title) {
+# Plot mean wages by new code for each variable.
+# With a mapping, the points are labelled with the level name: the code is on the vertical axis and the mean log wage on the
+# horizontal one, so each label sits on its own line to the right of its point. Without a mapping (industry, occupation: too many
+# levels to label) the code is on the horizontal axis.
+plot_wage_by_code <- function(X_numeric, Y, var_name, title, mapping = NULL, labels = NULL) {
   mean_wages <- tapply(Y, X_numeric[[var_name]], mean)
-  plot(mean_wages, 
-       xlab = "New Code", 
-       ylab = "Mean Log Wage",
-       main = title,
-       pch = 19,
-       col = "steelblue",
-       type = "b")
-  grid()
+  codes <- as.numeric(names(mean_wages))
+  if (is.null(mapping)) {
+    plot(codes, mean_wages, xlab = "New Code", ylab = "Mean Log Wage", main = title, pch = 19, col = "steelblue", type = "b")
+    grid()
+  } else {
+    if (is.null(labels)) labels <- mapping$description
+    lab <- labels[match(codes, mapping$new_code)]
+    xr <- range(mean_wages)
+    plot(mean_wages, codes, xlab = "Mean Log Wage", ylab = "New Code", main = title, pch = 19, col = "steelblue", type = "b",
+         xlim = c(xr[1], xr[2] + 0.9 * diff(xr)), yaxt = "n")
+    axis(2, at = codes, las = 1)
+    grid()
+    text(mean_wages, codes, lab, pos = 4, cex = 0.7)
+  }
 }
 
-plot_wage_by_code(X_ordered_numeric, Y, "industry", "Industry")
-plot_wage_by_code(X_ordered_numeric, Y, "occupation", "Occupation")
-plot_wage_by_code(X_ordered_numeric, Y, "race", "Race")
-plot_wage_by_code(X_ordered_numeric, Y, "citizenship", "Citizenship")
-plot_wage_by_code(X_ordered_numeric, Y, "marital", "Marital Status")
-plot_wage_by_code(X_ordered_numeric, Y, "economic_region", "Economic Region")
+# short names of the citizenship levels for the plot (the mapping holds the full descriptions)
+citizenship_short <- c("Born in the U.S.", "Born in PR, Guam, USVI, N. Marianas", "Born abroad, U.S. parent(s)",
+                       "Naturalized citizen", "Not a U.S. citizen")[as.numeric(citizenship_mapping$original_code)]
 
+plots <- list(
+  industry        = list("Industry"),
+  occupation      = list("Occupation"),
+  race            = list("Race", race_mapping),
+  citizenship     = list("Citizenship", citizenship_mapping, citizenship_short),
+  marital         = list("Marital Status", marital_mapping),
+  economic_region = list("Economic Region", economic_region_mapping)
+)
+
+# one file for each variable
+for (v in names(plots)) {
+  png(paste0("Supplementary_1_figs/mapping_wage_by_code_", v, ".png"), width = 1800, height = 1200, res = 300)
+  par(mar = c(4, 4, 3, 1))
+  do.call(plot_wage_by_code, c(list(X_ordered_numeric, Y, v), plots[[v]]))
+  dev.off()
+}
+
+# and all six on one page, as before
+png("Supplementary_1_figs/mapping_wage_by_code.png", width = 2000, height = 2400, res = 300)
+par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+for (v in names(plots)) do.call(plot_wage_by_code, c(list(X_ordered_numeric, Y, v), plots[[v]]))
 par(mfrow = c(1, 1))
 dev.off()
 }
@@ -1429,6 +1459,7 @@ run_test("mapping: the saved mapping file reloads with the six mappings", {
   expect_setequal(ls(e), c("race_mapping", "citizenship_mapping", "marital_mapping", "economic_region_mapping",
                            "industry_mapping_full_description", "occupation_mapping_full_description"))
 })
+
 ```
 
 ## testing  (for verification only)
